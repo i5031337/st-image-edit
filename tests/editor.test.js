@@ -28,7 +28,7 @@ function fixture(options = {}) {
     const deps = {
         origin: 'http://st.local',
         headers: () => ({ 'Content-Type': 'application/json', 'X-CSRF-Token': 'fixture' }),
-        getDefaults: () => ({ url: 'http://comfy.local:8188', width: 704, height: 1280 }),
+        getDefaults: () => ({ url: 'http://comfy.local:8188', workflow: 'Edit.json', width: 704, height: 1280 }),
         encode: async blob => `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString('base64')}`,
         randomSeed: () => 42,
         makeId: () => 'unique-id',
@@ -39,7 +39,7 @@ function fixture(options = {}) {
         fetch: async (url, init) => {
             requests.push({ url, ...init, body: init?.body ? JSON.parse(init.body) : undefined });
             switch (url) {
-                case '/api/sd/comfy/workflows': return Response.json(['Edit.json']);
+                case '/api/sd/comfy/workflows': return Response.json(options.files ?? ['Edit.json']);
                 case '/api/sd/comfy/workflow': return Response.json(options.workflow ?? json);
                 case '/api/sd/comfy/generate':
                     if (options.generate) return options.generate(init);
@@ -99,6 +99,46 @@ test('dimensions use explicit integers or ST defaults, without changing literal 
     await f.edit({ ...input, width: 1024, height: 1024 });
     const request = f.requests.find(r => r.url.endsWith('/generate'));
     assert.deepEqual(JSON.parse(request.body.prompt).prompt['3'].inputs, { width: 640, height: 960, batch_size: 1 });
+});
+
+test('workflow defaults to the active selection and permits an explicit override', async () => {
+    const f = fixture({ files: ['Edit.json', 'Other.json'] });
+    await f.edit({ ...input, workflow: undefined });
+    await f.edit({ ...input, workflow: 'Other.json' });
+    assert.deepEqual(f.requests.filter(r => r.url.endsWith('/workflow')).map(r => r.body.file_name), [
+        'Edit.json', 'Other.json',
+    ]);
+    const noDefault = fixture({ deps: { getDefaults: () => ({ url: 'http://comfy.local' }) } });
+    await assert.rejects(noDefault.edit({ ...input, workflow: undefined }), /Select a ComfyUI workflow/);
+    assert.equal(noDefault.requests.length, 0);
+    for (const workflow of ['', null, '../Edit.json']) {
+        const invalid = fixture();
+        await assert.rejects(invalid.edit({ ...input, workflow }), /saved JSON filename/);
+        assert.equal(invalid.requests.length, 0);
+    }
+});
+
+test('queued requests retain the active workflow selected when accepted', async () => {
+    const started = deferred();
+    const release = deferred();
+    const defaults = { url: 'http://comfy.local', workflow: 'Edit.json' };
+    let count = 0;
+    const f = fixture({
+        files: ['Edit.json', 'Other.json'], deps: { getDefaults: () => defaults },
+        generate: async () => {
+            if (++count === 1) { started.resolve(); await release.promise; }
+            return Response.json({ format: 'png', data: 'output' });
+        },
+    });
+    const first = f.edit({ ...input, workflow: undefined });
+    await started.promise;
+    const second = f.edit({ ...input, workflow: undefined });
+    defaults.workflow = 'Other.json';
+    release.resolve();
+    await Promise.all([first, second]);
+    assert.deepEqual(f.requests.filter(r => r.url.endsWith('/workflow')).map(r => r.body.file_name), [
+        'Edit.json', 'Edit.json',
+    ]);
 });
 
 test('invalid dimensions reject before any backend request; unresolved dimensions never generate', async () => {

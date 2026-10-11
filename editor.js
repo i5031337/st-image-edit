@@ -63,13 +63,16 @@ export function createEditor(deps) {
     return async function edit(input) {
         // Snapshot caller values and host defaults before entering the queue.
         const defaults = deps.getDefaults();
-        const job = { ...input, url: defaults.url };
+        const job = {
+            ...input, url: defaults.url,
+            workflow: input.workflow === undefined ? defaults.workflow : input.workflow,
+        };
         if (!job.url) throw new Error('Configure the ComfyUI URL in ST Image Generation first.');
         if (typeof job.prompt !== 'string' || !job.prompt.trim()) {
             throw new Error('Supply an editing prompt.');
         }
         if (typeof job.workflow !== 'string' || !/^[^/\\]+\.json$/i.test(job.workflow)) {
-            throw new Error('Supply workflow= with a saved ComfyUI JSON filename.');
+            throw new Error('Select a ComfyUI workflow in ST Image Generation or supply workflow= with a saved JSON filename.');
         }
         job.negativePrompt ??= '';
         if (typeof job.negativePrompt !== 'string') throw new Error('Negative prompt must be text.');

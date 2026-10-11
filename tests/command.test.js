@@ -4,10 +4,20 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
 
-test('host entry registers one command, returns URL quietly, reports failures and bridges ST cancellation', async () => {
+test('command resolves references and handles posting, failures, chat switches and cancellation', async () => {
     const commands = [];
     const saves = [];
     const errors = [];
+    const warnings = [];
+    const messages = [];
+    const rendered = [];
+    const events = [];
+    const references = [];
+    const workflowRequests = [];
+    let chatId = 'original-chat';
+    let characterId = 1;
+    let chatSaves = 0;
+    let onGenerate = () => {};
     let generationCount = 0;
     const sd = { comfy_url: 'http://comfy.local:8188', comfy_workflow: 'normal.json', width: 704, height: 1280 };
     const originalSettings = { ...sd };
@@ -18,25 +28,55 @@ test('host entry registers one command, returns URL quietly, reports failures an
     const context = vm.createContext({
         Blob, URL, AbortController, DOMException, Uint32Array,
         crypto: webcrypto, location: { origin: 'http://st.local' },
-        toastr: { error: (...args) => errors.push(args) },
+        toastr: {
+            error: (...args) => errors.push(args),
+            warning: (...args) => warnings.push(args),
+        },
         fetch: async (url, init) => {
-            assert.ok(url.startsWith('/api/sd/comfy/') || url.startsWith('data:'));
+            assert.ok(url.startsWith('/api/sd/comfy/') || url.startsWith('data:') || url.startsWith('http://st.local/user/images/'));
             if (url.startsWith('data:')) return fetch(url, init);
-            if (url.endsWith('/workflows')) return Response.json(['Edit.json']);
-            if (url.endsWith('/workflow')) return Response.json(workflow);
+            if (url.startsWith('http://st.local/user/images/')) {
+                return new Response('saved reference', { headers: { 'Content-Type': 'image/png' } });
+            }
+            if (url.endsWith('/workflows')) return Response.json(['Edit.json', 'normal.json']);
+            if (url.endsWith('/workflow')) {
+                workflowRequests.push(JSON.parse(init.body).file_name);
+                return Response.json(workflow);
+            }
             assert.equal(url, '/api/sd/comfy/generate');
             const graph = JSON.parse(JSON.parse(init.body).prompt);
             assert.equal(graph.prompt['2'].inputs.width, 832);
             assert.equal(graph.prompt['2'].inputs.height, 1216);
+            references.push(graph.prompt['1'].inputs.image);
             generationCount++;
+            onGenerate();
             return Response.json({ format: 'png', data: 'result-bytes' });
         },
     });
     const props = { fromProps: value => value };
     const host = {
-        '../../../../script.js': { getRequestHeaders: () => ({}) },
-        '../../../extensions.js': { extension_settings: { sd } },
+        '../../../../script.js': {
+            getRequestHeaders: () => ({}),
+            getMediaIndex: message => message.extra?.media_index ?? 0,
+            event_types: { MESSAGE_RECEIVED: 'received', CHARACTER_MESSAGE_RENDERED: 'rendered' },
+            eventSource: { emit: async (...args) => events.push(args) },
+        },
+        '../../../extensions.js': {
+            extension_settings: { sd },
+            getContext: () => ({
+                chat: messages, characterId, groupId: null,
+                getCurrentChatId: () => chatId,
+                addOneMessage: message => rendered.push(message),
+                saveChat: async () => { chatSaves++; },
+            }),
+        },
+        '../../../RossAscends-mods.js': { getMessageTimeStamp: () => 'fixture-timestamp' },
+        '../../../constants.js': {
+            MEDIA_TYPE: { IMAGE: 'image' }, MEDIA_DISPLAY: { GALLERY: 'gallery' },
+            MEDIA_SOURCE: { GENERATED: 'generated' },
+        },
         '../../../utils.js': {
+            isTrueBoolean: value => String(value).toLowerCase() === 'true',
             getBase64Async: async blob => `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString('base64')}`,
             saveBase64AsFile: async (...args) => {
                 saves.push(args);
@@ -48,7 +88,7 @@ test('host entry registers one command, returns URL quietly, reports failures an
         },
         '../../../slash-commands/SlashCommand.js': { SlashCommand: props },
         '../../../slash-commands/SlashCommandArgument.js': {
-            ARGUMENT_TYPE: { STRING: 'string', NUMBER: 'number' },
+            ARGUMENT_TYPE: { STRING: 'string', NUMBER: 'number', BOOLEAN: 'bool' },
             SlashCommandArgument: props, SlashCommandNamedArgument: props,
         },
     };
@@ -73,6 +113,7 @@ test('host entry registers one command, returns URL quietly, reports failures an
     await entry.evaluate();
     assert.equal(commands.length, 1);
     assert.equal(commands[0].name, 'image-edit');
+    assert.equal(commands[0].namedArgumentList.find(arg => arg.name === 'workflow').isRequired, false);
     const args = { reference: 'data:image/png;base64,Ynl0ZXM=', workflow: 'Edit.json', width: '832', height: '1216' };
     for (const name of ['width', 'height']) {
         assert.deepEqual(Array.from(commands[0].namedArgumentList.find(arg => arg.name === name).typeList), ['number']);
@@ -84,15 +125,104 @@ test('host entry registers one command, returns URL quietly, reports failures an
     assert.deepEqual(sd, originalSettings);
     await assert.rejects(commands[0].callback({ ...args, workflow: 'missing.json' }, 'smile'), /not found/);
     assert.equal(errors.length, 1);
+    assert.equal(messages.length, 0);
+    assert.equal(chatSaves, 0);
+
+    const postedUrl = await commands[0].callback({ ...args, chat: 'true' }, 'smile');
+    assert.equal(messages.length, 1);
+    assert.equal(rendered[0], messages[0]);
+    assert.equal(messages[0].is_system, true);
+    assert.equal(messages[0].extra.media[0].url, postedUrl);
+    assert.equal(messages[0].extra.media[0].title, 'smile');
+    assert.equal(messages[0].extra.media[0].type, 'image');
+    assert.equal(chatSaves, 1);
+    assert.deepEqual(events, [['received', 0, 'extension'], ['rendered', 0, 'extension']]);
+
+    await commands[0].callback({ ...args, chat: 'false' }, 'smile');
+    await entry.namespace.edit({
+        reference: args.reference, workflow: args.workflow, prompt: 'smile',
+        width: args.width, height: args.height, chat: true,
+    });
+    assert.equal(messages.length, 1);
+    assert.equal(chatSaves, 1);
+
+    onGenerate = () => { chatId = 'another-chat'; };
+    const switchedUrl = await commands[0].callback({ ...args, chat: true }, 'smile');
+    assert.match(switchedUrl, /^\/user\/images\//);
+    assert.equal(messages.length, 1);
+    assert.equal(chatSaves, 1);
+    assert.equal(warnings.length, 1);
+    onGenerate = () => { characterId = 2; };
+    await commands[0].callback({ ...args, chat: true }, 'smile');
+    assert.equal(messages.length, 1);
+    assert.equal(warnings.length, 2);
+
+    const count = generationCount;
+    chatId = null;
+    await assert.rejects(commands[0].callback({ ...args, chat: true }, 'smile'), /Open a chat/);
+    assert.equal(generationCount, count);
+    assert.equal(messages.length, 1);
+    assert.deepEqual(sd, originalSettings);
 
     // Model ST's EventTarget controller with its non-native signal object.
+    chatId = 'original-chat';
+    onGenerate = () => {};
+    const errorsBeforeCancel = errors.length;
     const stController = new EventTarget();
     stController.signal = { aborted: false };
-    const cancelled = commands[0].callback({ ...args, _abortController: stController }, 'smile');
+    const cancelled = commands[0].callback({ ...args, chat: true, _abortController: stController }, 'smile');
     const rejection = assert.rejects(cancelled, error => error.name === 'AbortError');
     stController.signal.aborted = true;
     stController.dispatchEvent(new Event('abort'));
     await rejection;
-    assert.equal(generationCount, 1);
-    assert.equal(errors.length, 1);
+    assert.equal(generationCount, count);
+    assert.equal(errors.length, errorsBeforeCancel);
+    assert.equal(messages.length, 1);
+    assert.equal(chatSaves, 1);
+
+    const selectedImage = 'data:image/png;base64,c2VsZWN0ZWQ=';
+    const legacyImage = 'data:image/png;base64,bGVnYWN5';
+    messages.push(
+        { extra: { media: [{ type: 'image', url: args.reference }, { type: 'image', url: selectedImage }], media_index: 1 } },
+        { extra: { image: legacyImage } },
+        { extra: { media: [{ type: 'video', url: '/video.webm' }] } },
+    );
+    const fromMessage = { ...args, reference: undefined, message: '1' };
+    const snapshot = JSON.stringify(messages);
+    await commands[0].callback({ ...fromMessage, message: 0 }, 'smile');
+    assert.equal(references.at(-1), Buffer.from('saved reference').toString('base64'));
+    await commands[0].callback(fromMessage, 'smile');
+    assert.equal(references.at(-1), 'c2VsZWN0ZWQ=');
+    await commands[0].callback({ ...fromMessage, message: 2 }, 'smile');
+    assert.equal(references.at(-1), 'bGVnYWN5');
+    assert.equal(JSON.stringify(messages), snapshot);
+
+    // Resolve the URL before awaiting the job, rather than re-reading a live message.
+    const pending = commands[0].callback(fromMessage, 'smile');
+    messages[1].extra.media[1].url = args.reference;
+    await pending;
+    assert.equal(references.at(-1), 'c2VsZWN0ZWQ=');
+
+    messages[1].extra.media_index = 0;
+    messages[1].extra.media[0] = { type: 'video', url: '/video.webm' };
+    messages[1].extra.media[1].url = selectedImage;
+    await commands[0].callback(fromMessage, 'smile');
+    assert.equal(references.at(-1), 'c2VsZWN0ZWQ=');
+
+    const countBeforeInvalidMessage = generationCount;
+    for (const value of [-1, 1.5, 'bad', '', null, true, Number.MAX_SAFE_INTEGER + 1]) {
+        await assert.rejects(commands[0].callback({ ...fromMessage, message: value }, 'smile'), /Message ID/);
+    }
+    await assert.rejects(commands[0].callback({ ...fromMessage, message: 99 }, 'smile'), /does not exist/);
+    await assert.rejects(commands[0].callback({ ...fromMessage, message: 3 }, 'smile'), /no attached image/);
+    await assert.rejects(commands[0].callback({ ...args, message: 1 }, 'smile'), /exactly one/);
+    await assert.rejects(commands[0].callback({ ...args, reference: undefined }, 'smile'), /reference= or message=/);
+    chatId = null;
+    await assert.rejects(commands[0].callback(fromMessage, 'smile'), /Open a chat/);
+    assert.equal(generationCount, countBeforeInvalidMessage);
+    assert.equal(chatSaves, 1);
+
+    await commands[0].callback({ ...args, workflow: undefined }, 'smile');
+    assert.equal(workflowRequests.at(-1), 'normal.json');
+    assert.deepEqual(sd, originalSettings);
 });

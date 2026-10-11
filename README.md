@@ -1,8 +1,9 @@
 # Image Edit
 
 A small SillyTavern extension with one command. Send an arbitrary reference to a
-saved ComfyUI editing workflow and receive a saved image URL. No chat messages,
-avatar changes, prompt rewriting, settings panel, or build step.
+saved ComfyUI editing workflow and receive a saved image URL. Quiet by default,
+with optional chat posting. No avatar changes, prompt rewriting, settings panel,
+or build step.
 
 ## Setup
 
@@ -18,11 +19,42 @@ avatar changes, prompt rewriting, settings panel, or build step.
 /image-edit reference="/user/images/reference.png" workflow="Edit.json" Give her an amused smile; preserve identity, outfit and framing.
 ```
 
+`workflow=` is optional: it defaults to the active ComfyUI workflow selected in
+ST Image Generation. Both the command and JavaScript API capture that selection
+when accepting a request; changing it later does not affect queued calls. The
+active workflow must satisfy the reference-image placeholder contract below.
+
 Alternatively supply `prompt="..."`. Optional arguments: `negative="..."`,
 `seed=12345`, `width=704`, and `height=1280`. Omit the seed for a random
 nonnegative safe integer. Dimensions must be positive safe integers; omitted
 dimensions use ST Image Generation settings. They replace workflow placeholders
 only; literal workflow dimensions stay unchanged.
+
+Use `message=<id>` instead of `reference=` to take an attached image from the
+current chat. Message IDs are zero-based, matching ST's displayed message IDs:
+
+```text
+/image-edit message=12 chat=true Give her an amused smile.
+```
+
+For a gallery, it uses the selected image; otherwise it uses the first attached
+image. Legacy `extra.image` attachments are also supported. Inline Markdown/HTML
+images are not attachments. Missing messages and messages without images fail
+before generation. Supply exactly one of `reference=` and `message=`. The image
+URL is captured immediately, so later message edits or chat switches cannot
+change an already queued request's reference.
+
+Add `chat=true` to also display the saved image as an Image Edit message:
+
+```text
+/image-edit reference="/user/images/reference.png" workflow="Edit.json" chat=true Give her an amused smile.
+```
+
+The command still returns the URL. The message is excluded from the LLM context.
+If you switch chats while generation runs, the image stays saved and the command
+returns its URL with a warning instead of posting to the newly opened chat.
+The JavaScript `edit()` function always stays quiet and accepts an explicit
+reference; `chat` and `message` are command options.
 
 The slash-command pipe receives `/user/images/image-edit/<unique-id>.png` (or
 the output's JPEG/WebP extension). The original image is untouched. Errors are
@@ -38,7 +70,7 @@ quoting and slash-parser macro expansion:
 const { edit } = await import('/scripts/extensions/third-party/st-image-edit/index.js');
 const url = await edit({
     reference: '/user/images/reference.png', // also accepts a Blob/File or data URL
-    workflow: 'Edit.json',
+    workflow: 'Edit.json',                  // optional; defaults to active ST workflow
     prompt: 'Keep the same person and clothes; show restrained anger.',
     negativePrompt: '',                     // optional
     seed: 12345,                            // optional

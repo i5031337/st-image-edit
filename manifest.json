@@ -3,7 +3,7 @@
     "loading_order": 100,
     "js": "index.js",
     "author": "i5031337",
-    "version": "0.2.0",
+    "version": "0.5.0",
     "requires": [],
     "optional": [],
     "description": "Edit an arbitrary reference through a saved ComfyUI workflow and return its URL."
