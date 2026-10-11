@@ -1,0 +1,255 @@
+{
+  "3": {
+    "inputs": {
+      "seed": "%seed%",
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "24",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": "%width%",
+      "height": "%height%",
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": "%prompt%",
+      "clip": [
+        "19",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "%negative_prompt%",
+      "clip": [
+        "19",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "20",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "sprites/sprite",
+      "images": [
+        "28",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "19": {
+    "inputs": {
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "20": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "22": {
+    "inputs": {
+      "base64_string": "%reference_image%"
+    },
+    "class_type": "Base64DecodeNode",
+    "_meta": {
+      "title": "Reference image (base64)"
+    }
+  },
+  "23": {
+    "inputs": {
+      "ip_adapter_name": "ip_adapter-Character_Reference-10.safetensors",
+      "auto_download": false
+    },
+    "class_type": "AnimaIPAdapterLoader",
+    "_meta": {
+      "title": "Anima IP-Adapter Loader (SigLIP2)"
+    }
+  },
+  "24": {
+    "inputs": {
+      "strength": 0.72,
+      "ref_image_size": 512,
+      "siglip_layer": -1,
+      "ip_cfg_scale": 1,
+      "ip_cfg_separate": false,
+      "gray_null": false,
+      "use_lora": false,
+      "model": [
+        "26",
+        0
+      ],
+      "ip_adapter": [
+        "23",
+        0
+      ],
+      "ref_image": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "AnimaIPAdapterApply",
+    "_meta": {
+      "title": "Anima IP-Adapter Apply (SigLIP2)"
+    }
+  },
+  "26": {
+    "inputs": {
+      "unet_name": "anima-turbo-v1.1.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "28": {
+    "inputs": {
+      "image": [
+        "8",
+        0
+      ],
+      "alpha": [
+        "35",
+        0
+      ]
+    },
+    "class_type": "JoinImageWithAlpha",
+    "_meta": {
+      "title": "Join Image with Alpha"
+    }
+  },
+  "35": {
+    "inputs": {
+      "mask": [
+        "34:13",
+        0
+      ]
+    },
+    "class_type": "InvertMask",
+    "_meta": {
+      "title": "Invert Mask"
+    }
+  },
+  "34:13": {
+    "inputs": {
+      "bg_removal_model": [
+        "34:14",
+        0
+      ],
+      "image": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "RemoveBackground",
+    "_meta": {
+      "title": "Remove Background"
+    }
+  },
+  "34:14": {
+    "inputs": {
+      "bg_removal_name": "birefnet.safetensors"
+    },
+    "class_type": "LoadBackgroundRemovalModel",
+    "_meta": {
+      "title": "Load Background Removal Model"
+    }
+  },
+  "34:15": {
+    "inputs": {
+      "mask": [
+        "34:13",
+        0
+      ]
+    },
+    "class_type": "InvertMask",
+    "_meta": {
+      "title": "Invert Mask"
+    }
+  },
+  "34:16": {
+    "inputs": {
+      "image": [
+        "8",
+        0
+      ],
+      "alpha": [
+        "34:15",
+        0
+      ]
+    },
+    "class_type": "JoinImageWithAlpha",
+    "_meta": {
+      "title": "Join Image with Alpha"
+    }
+  }
+}
