@@ -66,20 +66,21 @@ test('typed substitution preserves arbitrary prompt text and never re-expands it
     assert.equal(graph['1'].inputs.image, '%reference_image%');
 });
 
-test('Anima IP-Adapter example routes the reference to its installed loader and final alpha output', async () => {
-    const text = await readFile(new URL('../workflows/anima_ip_adapter_image_edit.json', import.meta.url), 'utf8');
+test('Flux example routes the reference through core conditioning to its final output', async () => {
+    const text = await readFile(new URL('../workflows/flux2_9b_edit.json', import.meta.url), 'utf8');
     const populated = populateWorkflow(text, {
         '%reference_image%': 'reference-bytes', '%prompt%': 'amused smile',
-        '%negative_prompt%': 'duplicate', '%seed%': 12345, '%width%': 704, '%height%': 1280,
+        '%seed%': 12345,
     });
-    assert.equal(populated['22'].class_type, 'Base64DecodeNode');
-    assert.equal(populated['22'].inputs.base64_string, 'reference-bytes');
-    assert.deepEqual(populated['24'].inputs.ref_image, ['22', 0]);
-    assert.equal(populated['6'].inputs.text, 'amused smile');
-    assert.equal(typeof populated['5'].inputs.width, 'number');
-    assert.equal(typeof populated['5'].inputs.height, 'number');
-    assert.equal(populated['28'].class_type, 'JoinImageWithAlpha');
-    assert.deepEqual(populated['9'].inputs.images, ['28', 0]);
+    assert.equal(populated['76'].class_type, 'Base64DecodeNode');
+    assert.equal(populated['76'].inputs.base64_string, 'reference-bytes');
+    assert.deepEqual(populated['130'].inputs.image, ['76', 0]);
+    assert.deepEqual(populated['117'].inputs.pixels, ['130', 0]);
+    assert.deepEqual(populated['118'].inputs.latent, ['117', 0]);
+    assert.deepEqual(populated['116'].inputs.latent, ['117', 0]);
+    assert.equal(populated['135'].inputs.text, 'amused smile');
+    assert.equal(populated['125'].inputs.noise_seed, 12345);
+    assert.deepEqual(populated['94'].inputs.images, ['124', 0]);
 });
 
 test('dimensions use explicit integers or ST defaults, without changing literal workflow inputs', async () => {
