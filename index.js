@@ -35,11 +35,13 @@ async function command(args, text) {
     args._abortController?.addEventListener('abort', abort);
     if (args._abortController?.signal.aborted) abort();
     try {
-        if (args.reference !== undefined && args.message !== undefined) {
-            throw new Error('Supply exactly one of reference= and message=.');
+        const attached = isTrueBoolean(args.attached);
+        if ([args.reference !== undefined, args.message !== undefined, attached].filter(Boolean).length > 1) {
+            throw new Error('Supply exactly one of reference=, message=, and attached=true.');
         }
-        const reference = args.message === undefined ? args.reference : messageReference(args.message);
-        if (!reference) throw new Error('Supply reference= or message= for the reference image.');
+        const reference = attached ? attachedReference()
+            : args.message === undefined ? args.reference : messageReference(args.message);
+        if (!reference) throw new Error('Supply reference= or message= or attached=true for the reference image.');
         const target = isTrueBoolean(args.chat) ? getContext() : null;
         const chatId = target?.getCurrentChatId();
         if (target && !chatId) throw new Error('Open a chat before using chat=true.');
@@ -62,6 +64,15 @@ async function command(args, text) {
     } finally {
         args._abortController?.removeEventListener('abort', abort);
     }
+}
+
+function attachedReference() {
+    // Capture the File now: the composer may be cleared or changed while the job waits.
+    const files = Array.from(document.getElementById('file_form_input')?.files ?? []);
+    const images = files.filter(file => file.type.toLowerCase().startsWith('image/'));
+    if (!images.length) throw new Error('Attach an image to the message composer before using attached=true.');
+    if (images.length > 1) throw new Error('Attach exactly one image to use attached=true.');
+    return images[0];
 }
 
 function messageReference(value) {
@@ -112,8 +123,9 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
     callback: command,
     returns: 'Saved image URL. Add chat=true to also post it to the current chat.',
     namedArgumentList: [
-        argument('reference', 'Same-origin image URL or base64 image data URL (alternative to message=)'),
+        argument('reference', 'Same-origin image URL or base64 image data URL (alternative to message= or attached=true)'),
         argument('message', 'Message ID in the current chat to take the reference image from', false, ARGUMENT_TYPE.NUMBER),
+        argument('attached', 'Use the single image attached to the message composer (default: false)', false, ARGUMENT_TYPE.BOOLEAN),
         argument('workflow', 'Saved workflow filename (defaults to the active ST ComfyUI workflow)'),
         argument('prompt', 'Editing instruction (alternatively use trailing text)'),
         argument('negative', 'Optional negative prompt'),
@@ -126,5 +138,5 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         description: 'Editing instruction when prompt= is omitted', typeList: [ARGUMENT_TYPE.STRING],
         isRequired: false,
     })],
-    helpString: '<p>Edit a reference using a saved ComfyUI workflow. Supply reference= or message= (zero-based chat message ID). Workflow defaults to the active ST ComfyUI workflow; use workflow= to override. Returns a saved URL; add chat=true to also post it.</p><p>Required inputs: %reference_image% (raw base64), %prompt%. Optional: %negative_prompt%, %seed%, %width%, %height%. Each placeholder fills a whole JSON string value. Dimensions default to ST Image Generation settings; literal workflow dimensions stay unchanged.</p><p><code>/image-edit message=12 chat=true width=704 height=1280 Give her an amused smile.</code></p>',
+    helpString: '<p>Edit a reference using a saved ComfyUI workflow. Supply reference=, message= (zero-based chat message ID), or attached=true (the single image attached to the message composer). Workflow defaults to the active ST ComfyUI workflow; use workflow= to override. Returns a saved URL; add chat=true to also post it. The original composer attachment stays unchanged.</p><p>Required inputs: %reference_image% (raw base64), %prompt%. Optional: %negative_prompt%, %seed%, %width%, %height%. Each placeholder fills a whole JSON string value. Dimensions default to ST Image Generation settings; literal workflow dimensions stay unchanged.</p><p><code>/image-edit attached=true Give her an amused smile.</code></p><p><code>/image-edit message=12 chat=true width=704 height=1280 Give her an amused smile.</code></p>',
 }));

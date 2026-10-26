@@ -27,11 +27,15 @@ only the result you want saved.
 ```text
 /image-edit reference="/user/images/reference.png" Give her an amused smile.
 /image-edit message=12 workflow="Edit.json" chat=true Give her an amused smile.
+/image-edit attached=true Give her an amused smile.
 ```
 
 Supply exactly one of `reference=` (a same-origin image URL or PNG/JPEG/WebP
-base64 data URL) and `message=` (a zero-based ID of a chat message with an image
-attachment). `workflow=` defaults to the active ComfyUI workflow. Optional
+base64 data URL), `message=` (a zero-based ID of a chat message with an image
+attachment), or `attached=true` (the image currently attached to the message
+composer, before sending). For `attached=true`, attach exactly one image;
+other non-image files may also be attached. The original composer attachment
+stays unchanged. `workflow=` defaults to the active ComfyUI workflow. Optional
 arguments are `prompt="..."` instead of trailing text, `negative="..."`,
 `seed=12345`, `width=704`, `height=1280`, and `chat=true`. Dimensions fill
 placeholders only; literal dimensions in the graph stay as they are. The

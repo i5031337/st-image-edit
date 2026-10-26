@@ -19,6 +19,7 @@ test('command resolves references and handles posting, failures, chat switches a
     let chatSaves = 0;
     let onGenerate = () => {};
     let generationCount = 0;
+    const composer = { files: [] };
     const sd = { comfy_url: 'http://comfy.local:8188', comfy_workflow: 'normal.json', width: 704, height: 1280 };
     const originalSettings = { ...sd };
     const workflow = JSON.stringify({
@@ -28,6 +29,7 @@ test('command resolves references and handles posting, failures, chat switches a
     const context = vm.createContext({
         Blob, URL, AbortController, DOMException, Uint32Array,
         crypto: webcrypto, location: { origin: 'http://st.local' },
+        document: { getElementById: id => id === 'file_form_input' ? composer : null },
         toastr: {
             error: (...args) => errors.push(args),
             warning: (...args) => warnings.push(args),
@@ -114,6 +116,7 @@ test('command resolves references and handles posting, failures, chat switches a
     assert.equal(commands.length, 1);
     assert.equal(commands[0].name, 'image-edit');
     assert.equal(commands[0].namedArgumentList.find(arg => arg.name === 'workflow').isRequired, false);
+    assert.deepEqual(Array.from(commands[0].namedArgumentList.find(arg => arg.name === 'attached').typeList), ['bool']);
     const args = { reference: 'data:image/png;base64,Ynl0ZXM=', workflow: 'Edit.json', width: '832', height: '1216' };
     for (const name of ['width', 'height']) {
         assert.deepEqual(Array.from(commands[0].namedArgumentList.find(arg => arg.name === name).typeList), ['number']);
@@ -225,4 +228,41 @@ test('command resolves references and handles posting, failures, chat switches a
     await commands[0].callback({ ...args, workflow: undefined }, 'smile');
     assert.equal(workflowRequests.at(-1), 'normal.json');
     assert.deepEqual(sd, originalSettings);
+
+    const fromAttachment = { ...args, reference: undefined, attached: 'true' };
+    const attachment = new Blob(['composer image'], { type: 'image/png' });
+    const textFile = new Blob(['notes'], { type: 'text/plain' });
+    composer.files = [textFile, attachment];
+    const originalFiles = composer.files;
+    await commands[0].callback(fromAttachment, 'smile');
+    assert.equal(references.at(-1), Buffer.from('composer image').toString('base64'));
+    assert.equal(composer.files, originalFiles);
+    assert.equal(messages.length, 4);
+    assert.equal(chatSaves, 1);
+
+    // Clearing or replacing the composer cannot change an already accepted reference.
+    const attachedPending = commands[0].callback(fromAttachment, 'smile');
+    composer.files = [];
+    await attachedPending;
+    assert.equal(references.at(-1), Buffer.from('composer image').toString('base64'));
+
+    const beforeInvalidAttachment = generationCount;
+    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /Attach an image/);
+    composer.files = [textFile];
+    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /Attach an image/);
+    composer.files = [attachment, attachment];
+    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /exactly one image/);
+    composer.files = [new Blob(['gif'], { type: 'image/gif' })];
+    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /PNG, JPEG, or WebP/);
+    composer.files = [attachment];
+    await assert.rejects(commands[0].callback({ ...args, attached: true }, 'smile'), /exactly one/);
+    await assert.rejects(commands[0].callback({ ...fromAttachment, message: 1 }, 'smile'), /exactly one/);
+    assert.equal(generationCount, beforeInvalidAttachment);
+
+    await commands[0].callback({ ...args, attached: 'false' }, 'smile');
+    assert.equal(references.at(-1), 'Ynl0ZXM=');
+    chatId = 'original-chat';
+    const attachedPosted = await commands[0].callback({ ...fromAttachment, chat: true }, 'smile');
+    assert.equal(messages.at(-1).extra.media[0].url, attachedPosted);
+    assert.equal(composer.files[0], attachment);
 });
