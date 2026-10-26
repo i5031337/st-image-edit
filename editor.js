@@ -70,6 +70,12 @@ export function createEditor(deps) {
         if (typeof job.workflow !== 'string' || !/^[^/\\]+\.json$/i.test(job.workflow)) {
             throw new Error('Select a ComfyUI workflow in ST Image Generation or supply workflow= with a saved JSON filename.');
         }
+        if (input.reference !== undefined && input.references !== undefined) {
+            throw new Error('Supply either reference or references, not both.');
+        }
+        const source = input.references ?? input.reference;
+        job.references = Array.isArray(source) ? [...source] : [source];
+        if (!job.references.length) throw new Error('Supply at least one reference image.');
         job.negativePrompt ??= '';
         if (typeof job.negativePrompt !== 'string') throw new Error('Negative prompt must be text.');
         job.seed = integer(job.seed === undefined ? deps.randomSeed() : job.seed, 'Seed', 0);
@@ -89,15 +95,22 @@ export function createEditor(deps) {
             const text = await post('/api/sd/comfy/workflow', { file_name: job.workflow }, signal);
             checkAbort(signal);
             const values = {
-                '%reference_image%': '', '%prompt%': job.prompt,
+                '%prompt%': job.prompt,
                 '%negative_prompt%': job.negativePrompt, '%seed%': job.seed,
             };
             for (const name of ['width', 'height']) {
                 if (job[name] !== undefined) values[`%${name}%`] = job[name];
             }
-            populateWorkflow(text, values); // Validate before loading the reference or generating.
-            values['%reference_image%'] = await loadReference(job.reference, deps, signal);
-            const graph = populateWorkflow(text, values);
+            for (let index = 1; index <= job.references.length; index++) {
+                values[`%reference_image_${index}%`] = '';
+            }
+            values['%reference_image%'] = '';
+            populateWorkflow(text, values, job.references.length); // Validate before loading images.
+            for (let index = 0; index < job.references.length; index++) {
+                values[`%reference_image_${index + 1}%`] = await loadReference(job.references[index], deps, signal);
+            }
+            values['%reference_image%'] = values['%reference_image_1%'];
+            const graph = populateWorkflow(text, values, job.references.length);
             checkAbort(signal);
             // Deliberately do not abort this fetch: ST can issue a backend-wide /interrupt.
             const result = await post('/api/sd/comfy/generate', {

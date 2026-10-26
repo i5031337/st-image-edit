@@ -1,0 +1,280 @@
+{
+  "76": {
+    "class_type": "Base64DecodeNode",
+    "inputs": {
+      "base64_string": "%reference_image_1%"
+    }
+  },
+  "94": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "124",
+        0
+      ],
+      "filename_prefix": "Flux2_Klein_9b_kv_2ref"
+    }
+  },
+  "116": {
+    "class_type": "ReferenceLatent",
+    "inputs": {
+      "conditioning": [
+        "685",
+        0
+      ],
+      "latent": [
+        "117",
+        0
+      ]
+    }
+  },
+  "117": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "130",
+        0
+      ],
+      "vae": [
+        "127",
+        0
+      ]
+    }
+  },
+  "118": {
+    "class_type": "ReferenceLatent",
+    "inputs": {
+      "conditioning": [
+        "135",
+        0
+      ],
+      "latent": [
+        "117",
+        0
+      ]
+    }
+  },
+  "122": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "123": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "125",
+        0
+      ],
+      "guider": [
+        "138",
+        0
+      ],
+      "sampler": [
+        "122",
+        0
+      ],
+      "sigmas": [
+        "137",
+        0
+      ],
+      "latent_image": [
+        "129",
+        0
+      ]
+    }
+  },
+  "124": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "123",
+        0
+      ],
+      "vae": [
+        "127",
+        0
+      ]
+    }
+  },
+  "125": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": "%seed%"
+    }
+  },
+  "126": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux-2-klein-9b-kv-fp8.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "127": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    }
+  },
+  "128": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "130",
+        0
+      ]
+    }
+  },
+  "129": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": {
+      "width": [
+        "128",
+        0
+      ],
+      "height": [
+        "128",
+        1
+      ],
+      "batch_size": 1
+    }
+  },
+  "130": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": {
+      "image": [
+        "76",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1
+    }
+  },
+  "133": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "cpu"
+    }
+  },
+  "135": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "%prompt%",
+      "clip": [
+        "133",
+        0
+      ]
+    }
+  },
+  "137": {
+    "class_type": "Flux2Scheduler",
+    "inputs": {
+      "steps": 4,
+      "width": [
+        "128",
+        0
+      ],
+      "height": [
+        "128",
+        1
+      ]
+    }
+  },
+  "138": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "139",
+        0
+      ],
+      "positive": [
+        "143",
+        0
+      ],
+      "negative": [
+        "144",
+        0
+      ],
+      "cfg": 1
+    }
+  },
+  "139": {
+    "class_type": "FluxKVCache",
+    "inputs": {
+      "model": [
+        "126",
+        0
+      ]
+    }
+  },
+  "685": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "135",
+        0
+      ]
+    }
+  },
+  "140": {
+    "class_type": "Base64DecodeNode",
+    "inputs": {
+      "base64_string": "%reference_image_2%"
+    }
+  },
+  "141": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": {
+      "image": [
+        "140",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1
+    }
+  },
+  "142": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "141",
+        0
+      ],
+      "vae": [
+        "127",
+        0
+      ]
+    }
+  },
+  "143": {
+    "class_type": "ReferenceLatent",
+    "inputs": {
+      "conditioning": [
+        "118",
+        0
+      ],
+      "latent": [
+        "142",
+        0
+      ]
+    }
+  },
+  "144": {
+    "class_type": "ReferenceLatent",
+    "inputs": {
+      "conditioning": [
+        "116",
+        0
+      ],
+      "latent": [
+        "142",
+        0
+      ]
+    }
+  }
+}

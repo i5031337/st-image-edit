@@ -1,6 +1,6 @@
-const REQUIRED = ['%reference_image%', '%prompt%'];
+const REQUIRED = ['%prompt%'];
 
-export function populateWorkflow(text, values) {
+export function populateWorkflow(text, values, referenceCount = 1) {
     let graph;
     try {
         graph = JSON.parse(text);
@@ -20,6 +20,9 @@ export function populateWorkflow(text, values) {
                 found.add(value);
                 return values[value];
             }
+            if (/^%reference_image_[1-9][0-9]*%$/.test(value)) {
+                throw new Error(`Workflow requires a reference image for ${value}.`);
+            }
             if (/%[a-zA-Z_][a-zA-Z0-9_]*%/.test(value)) {
                 throw new Error(`Unsupported or embedded workflow placeholder: ${value.slice(0, 100)}`);
             }
@@ -37,6 +40,11 @@ export function populateWorkflow(text, values) {
     ]));
     for (const placeholder of REQUIRED) {
         if (!found.has(placeholder)) throw new Error(`Editing workflow is missing ${placeholder}.`);
+    }
+    for (let index = 1; index <= referenceCount; index++) {
+        if (!found.has(`%reference_image_${index}%`) && !(index === 1 && found.has('%reference_image%'))) {
+            throw new Error(`Editing workflow is missing ${index === 1 ? '%reference_image% or %reference_image_1%' : `%reference_image_${index}%`} for supplied reference ${index}.`);
+        }
     }
     return populated;
 }

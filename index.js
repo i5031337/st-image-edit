@@ -42,7 +42,7 @@ async function command(args, text) {
         }
         // Explicit sources override the automatic composer/last-message selection.
         const reference = args.reference !== undefined ? args.reference
-            : args.message !== undefined ? messageReference(args.message)
+            : args.message !== undefined ? (Array.isArray(args.message) ? args.message : [args.message]).map(messageReference)
                 : (args.attached === undefined || attached ? attachedReference() : undefined)
                     ?? lastMessageReference();
         if (!reference) throw new Error('No reference image found. Attach an image or use reference= or message=.');
@@ -74,8 +74,7 @@ function attachedReference() {
     // Capture the File now: the composer may be cleared or changed while the job waits.
     const files = Array.from(document.getElementById('file_form_input')?.files ?? []);
     const images = files.filter(file => file.type.toLowerCase().startsWith('image/'));
-    if (images.length > 1) throw new Error('Attach exactly one image to use attached=true.');
-    return images[0];
+    return images.length ? images : undefined;
 }
 
 function lastMessageReference() {
@@ -124,17 +123,17 @@ async function postImage(url, prompt, target, chatId) {
     await context.saveChat();
 }
 
-const argument = (name, description, required = false, type = ARGUMENT_TYPE.STRING) =>
-    SlashCommandNamedArgument.fromProps({ name, description, typeList: [type], isRequired: required });
+const argument = (name, description, required = false, type = ARGUMENT_TYPE.STRING, acceptsMultiple = false) =>
+    SlashCommandNamedArgument.fromProps({ name, description, typeList: [type], isRequired: required, acceptsMultiple });
 
 SlashCommandParser.addCommandObject(SlashCommand.fromProps({
     name: 'image-edit',
     callback: command,
     returns: 'Saved image URL. Posts to the current chat by default; use chat=false for URL only.',
     namedArgumentList: [
-        argument('reference', 'Same-origin image URL or base64 image data URL (alternative to message= or attached=true)'),
-        argument('message', 'Message ID to take the reference image from (defaults to {{lastMessageID}} when no composer image exists)', false, ARGUMENT_TYPE.NUMBER),
-        argument('attached', 'Use the single composer image, falling back to the last message (default: true; explicit reference= or message= overrides)', false, ARGUMENT_TYPE.BOOLEAN),
+        argument('reference', 'Image URL or base64 data URL; repeat reference= for multiple images in order', false, ARGUMENT_TYPE.STRING, true),
+        argument('message', 'Message ID to take the selected image from; repeat message= for multiple images in order', false, ARGUMENT_TYPE.NUMBER, true),
+        argument('attached', 'Use all composer images in attachment order, falling back to the last message (default: true; explicit reference= or message= overrides)', false, ARGUMENT_TYPE.BOOLEAN),
         argument('workflow', 'Saved workflow filename (defaults to the active ST ComfyUI workflow)'),
         argument('prompt', 'Editing instruction (alternatively use trailing text)'),
         argument('negative', 'Optional negative prompt'),
@@ -147,5 +146,5 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         description: 'Editing instruction when prompt= is omitted', typeList: [ARGUMENT_TYPE.STRING],
         isRequired: false,
     })],
-    helpString: '<p>Edit a reference using a saved ComfyUI workflow. Defaults to attached=true: use the single composer image, falling back to message={{lastMessageID}} if none is attached. Use reference= or message= (zero-based chat message ID) to select an explicit source, or attached=false to skip the composer. Workflow defaults to the active ST ComfyUI workflow; use workflow= to override. Returns a saved URL and posts to chat by default; use chat=false for URL only. The original composer attachment stays unchanged.</p><p>Required inputs: %reference_image% (raw base64), %prompt%. Optional: %negative_prompt%, %seed%, %width%, %height%. Each placeholder fills a whole JSON string value. Dimensions default to ST Image Generation settings; literal workflow dimensions stay unchanged.</p><p><code>/image-edit Give her an amused smile.</code></p><p><code>/image-edit message=12 chat=false width=704 height=1280 Give her an amused smile.</code></p>',
+    helpString: '<p>Edit a reference using a saved ComfyUI workflow. Defaults to attached=true: use all composer images in attachment order, falling back to message={{lastMessageID}} if none is attached. Use reference= or message= (zero-based chat message ID) to select an explicit source, or attached=false to skip the composer. Workflow defaults to the active ST ComfyUI workflow; use workflow= to override. Returns a saved URL and posts to chat by default; use chat=false for URL only. The original composer attachment stays unchanged.</p><p>Required inputs: %prompt% and %reference_image_1%, %reference_image_2%, etc. (raw base64), one per supplied image. %reference_image% is an alias for image 1. Repeat reference= or message= for multiple explicit sources. The workflow must use every supplied reference. Optional: %negative_prompt%, %seed%, %width%, %height%. Each placeholder fills a whole JSON string value. Dimensions default to ST Image Generation settings; literal workflow dimensions stay unchanged.</p><p><code>/image-edit Give her an amused smile.</code></p><p><code>/image-edit message=12 chat=false width=704 height=1280 Give her an amused smile.</code></p>',
 }));

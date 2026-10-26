@@ -351,3 +351,99 @@ test('generation and saving failures reject and do not poison the queue', async 
     await assert.rejects(fixture({ deps: { save: async () => { throw new Error('disk full'); } } }).edit(input), /disk full/);
     await assert.rejects(fixture({ deps: { save: async () => 'data:image/png;base64,abc' } }).edit(input), /served image URL/);
 });
+
+
+test('supports arbitrary reference counts and both spellings for the first image', async () => {
+    for (const count of [1, 4, 10, 17]) {
+        const workflow = { 'prompt': { class_type: 'Text', inputs: { text: '%prompt%' } } };
+        const sources = Array.from({ length: count }, (_, index) => {
+            workflow[String(index)] = { class_type: 'Base64DecodeNode', inputs: { image: `%reference_image_${index + 1}%` } };
+            return new Blob([`image ${index + 1}`], { type: 'image/png' });
+        });
+        const f = fixture({ workflow: JSON.stringify(workflow) });
+        await f.edit({ ...input, reference: undefined, references: sources });
+        const populated = JSON.parse(f.requests.find(r => r.url.endsWith('/generate')).body.prompt).prompt;
+        for (let index = 0; index < count; index++) {
+            assert.equal(populated[String(index)].inputs.image, Buffer.from(`image ${index + 1}`).toString('base64'));
+        }
+    }
+});
+
+test('reference mismatches fail before loading images or generating', async () => {
+    const two = JSON.stringify({ ...graph, '3': { class_type: 'Loader', inputs: { image: '%reference_image_2%' } } });
+    for (const [workflow, sources, error] of [
+        [two, [reference], /requires a reference image.*%reference_image_2%/],
+        [json, [reference, reference], /missing %reference_image_2%/],
+        [two.replace('%reference_image_2%', '%reference_image_3%'), [reference, reference], /%reference_image_3%/],
+        [json, [], /at least one/],
+    ]) {
+        let encoded = 0;
+        const f = fixture({ workflow, deps: { encode: async () => { encoded++; return 'data:image/png;base64,YQ=='; } } });
+        await assert.rejects(f.edit({ ...input, reference: sources }), error);
+        assert.equal(encoded, 0);
+        assert.ok(!f.requests.some(r => r.url.endsWith('/generate')));
+    }
+    await assert.rejects(fixture().edit({ ...input, references: [reference] }), /either reference or references/);
+});
+
+test('queued reference arrays are copied and invalid later images prevent generation', async () => {
+    const two = JSON.stringify({ ...graph, '3': { class_type: 'Loader', inputs: { image: '%reference_image_2%' } } });
+    const gate = deferred();
+    const started = deferred();
+    let count = 0;
+    const f = fixture({ workflow: two, generate: async () => {
+        if (++count === 1) { started.resolve(); await gate.promise; }
+        return Response.json({ format: 'png', data: 'output' });
+    } });
+    const sources = [reference, new Blob(['second'], { type: 'image/webp' })];
+    const first = f.edit({ ...input, reference: sources });
+    await started.promise;
+    const second = f.edit({ ...input, reference: sources });
+    sources[1] = new Blob(['changed'], { type: 'text/plain' });
+    sources.length = 1;
+    gate.resolve();
+    await Promise.all([first, second]);
+    const jobs = f.requests.filter(r => r.url.endsWith('/generate'));
+    assert.equal(JSON.parse(jobs[1].body.prompt).prompt['3'].inputs.image, Buffer.from('second').toString('base64'));
+    const invalid = fixture({ workflow: two });
+    await assert.rejects(invalid.edit({ ...input, reference: [reference, new Blob(['text'], { type: 'text/plain' })] }), /PNG, JPEG, or WebP/);
+    assert.ok(!invalid.requests.some(r => r.url.endsWith('/generate')));
+});
+
+
+test('two-reference Flux example conditions on both images with the original models and output size', async () => {
+    const text = await readFile(new URL('../workflows/flux2_9b_edit_2ref.json', import.meta.url), 'utf8');
+    const original = JSON.parse(await readFile(new URL('../workflows/flux2_9b_edit.json', import.meta.url), 'utf8'));
+    const f = fixture({ workflow: text });
+    await f.edit({ ...input, reference: undefined, references: [
+        new Blob(['person'], { type: 'image/png' }), new Blob(['outfit'], { type: 'image/webp' }),
+    ] });
+    const graph = JSON.parse(f.requests.find(r => r.url.endsWith('/generate')).body.prompt).prompt;
+    for (const id of ['122', '123', '125', '126', '127', '128', '129', '130', '133', '137', '139']) {
+        const expected = structuredClone(original[id]);
+        if (id === '125') expected.inputs.noise_seed = input.seed;
+        assert.deepEqual(graph[id], expected);
+    }
+    for (const branch of ['positive', 'negative']) {
+        let link = graph['138'].inputs[branch];
+        const images = [];
+        while (graph[link[0]].class_type === 'ReferenceLatent') {
+            const node = graph[link[0]];
+            const encoder = graph[node.inputs.latent[0]];
+            assert.equal(encoder.class_type, 'VAEEncode');
+            assert.deepEqual(encoder.inputs.vae, ['127', 0]);
+            const scale = graph[encoder.inputs.pixels[0]];
+            assert.equal(scale.class_type, 'ImageScaleToTotalPixels');
+            assert.equal(scale.inputs.megapixels, 1);
+            const loader = graph[scale.inputs.image[0]];
+            assert.equal(loader.class_type, 'Base64DecodeNode');
+            images.unshift(loader.inputs.base64_string);
+            link = node.inputs.conditioning;
+        }
+        assert.deepEqual(images, ['person', 'outfit'].map(value => Buffer.from(value).toString('base64')));
+        assert.equal(graph[link[0]].class_type, branch === 'positive' ? 'CLIPTextEncode' : 'ConditioningZeroOut');
+    }
+    assert.deepEqual(graph['94'].inputs.images, ['124', 0]);
+    assert.equal(Object.values(graph).filter(node => node.class_type === 'SaveImage').length, 1);
+    assert.throws(() => populateWorkflow(text, { '%reference_image_1%': 'person', '%prompt%': 'edit', '%seed%': 12 }), /%reference_image_2%/);
+});

@@ -14,6 +14,7 @@ test('command resolves references and handles posting, failures, chat switches a
     const events = [];
     const references = [];
     const workflowRequests = [];
+    const generatedGraphs = [];
     const generatedIds = [];
     let chatId = 'original-chat';
     let characterId = 1;
@@ -23,7 +24,7 @@ test('command resolves references and handles posting, failures, chat switches a
     const composer = { files: [] };
     const sd = { comfy_url: 'http://comfy.local:8188', comfy_workflow: 'normal.json', width: 704, height: 1280 };
     const originalSettings = { ...sd };
-    const workflow = JSON.stringify({
+    let workflow = JSON.stringify({
         '1': { class_type: 'ETN_LoadImageBase64', inputs: { image: '%reference_image%' } },
         '2': { class_type: 'EditingFixture', inputs: { prompt: '%prompt%', width: '%width%', height: '%height%' } },
     });
@@ -53,6 +54,7 @@ test('command resolves references and handles posting, failures, chat switches a
             assert.equal(graph.prompt['2'].inputs.width, 832);
             assert.equal(graph.prompt['2'].inputs.height, 1216);
             references.push(graph.prompt['1'].inputs.image);
+            generatedGraphs.push(graph.prompt);
             generationCount++;
             onGenerate();
             return Response.json({ format: 'png', data: 'result-bytes' });
@@ -262,7 +264,7 @@ test('command resolves references and handles posting, failures, chat switches a
     composer.files = [textFile];
     await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /Open a chat/);
     composer.files = [attachment, attachment];
-    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /exactly one image/);
+    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /%reference_image_2%/);
     composer.files = [new Blob(['gif'], { type: 'image/gif' })];
     await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /PNG, JPEG, or WebP/);
     composer.files = [attachment];
@@ -312,6 +314,29 @@ test('command resolves references and handles posting, failures, chat switches a
     composer.files = [attachment];
     await commands[0].callback({ ...automatic, chat: false }, 'smile');
     assert.equal(references.at(-1), Buffer.from('composer image').toString('base64'));
+
+    // Arbitrary composer inputs and repeated explicit arguments preserve source order.
+    const singleWorkflow = workflow;
+    const multiGraph = JSON.parse(workflow);
+    multiGraph['3'] = { class_type: 'Base64DecodeNode', inputs: { image: '%reference_image_2%' } };
+    workflow = JSON.stringify(multiGraph);
+    const secondAttachment = new Blob(['second image'], { type: 'image/webp' });
+    composer.files = [attachment, textFile, secondAttachment];
+    const multiplePending = commands[0].callback({ ...automatic, chat: false }, 'combine');
+    composer.files = [];
+    await multiplePending;
+    assert.equal(generatedGraphs.at(-1)['1'].inputs.image, Buffer.from('composer image').toString('base64'));
+    assert.equal(generatedGraphs.at(-1)['3'].inputs.image, Buffer.from('second image').toString('base64'));
+    await commands[0].callback({ ...args, reference: [selectedImage, legacyImage] }, 'combine');
+    assert.equal(generatedGraphs.at(-1)['1'].inputs.image, 'c2VsZWN0ZWQ=');
+    assert.equal(generatedGraphs.at(-1)['3'].inputs.image, 'bGVnYWN5');
+    await commands[0].callback({ ...fromMessage, message: [2, 1] }, 'combine');
+    assert.equal(generatedGraphs.at(-1)['1'].inputs.image, 'bGVnYWN5');
+    assert.equal(generatedGraphs.at(-1)['3'].inputs.image, 'c2VsZWN0ZWQ=');
+    for (const name of ['reference', 'message']) {
+        assert.equal(commands[0].namedArgumentList.find(arg => arg.name === name).acceptsMultiple, true);
+    }
+    workflow = singleWorkflow;
 
     composer.files = [];
     messages.length = 0;

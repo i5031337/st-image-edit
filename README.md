@@ -14,8 +14,14 @@ returns a saved image URL and posts the result to chat by default.
    ComfyUI workflow editor.
    Select it as the active workflow, or pass its filename with `workflow=`.
 
-The graph needs a base64 image loader and two whole-string input values:
-`%reference_image%` (raw base64 bytes) and `%prompt%` (your instruction). It may
+The graph needs base64 image loaders and whole-string input values:
+`%prompt%` (your instruction) and `%reference_image_1%`, `%reference_image_2%`,
+etc. (raw base64 bytes), one per reference image. `%reference_image%` is an alias
+for `%reference_image_1%`, so existing single-image workflows still work.
+There is no fixed reference-count limit: provide a workflow wired for as many
+images as you want to supply. Every supplied image must have a placeholder in
+the workflow, and every reference placeholder must have a supplied image;
+mismatches fail before images are loaded or generation starts. It may
 also use `%negative_prompt%`, `%seed%`, `%width%`, and `%height%`. A normal
 ComfyUI `LoadImage` node cannot decode `%reference_image%`. A compatible base64
 decoder is required; the included example uses `Base64DecodeNode` from
@@ -28,19 +34,22 @@ only the result you want saved.
 /image-edit reference="/user/images/reference.png" Give her an amused smile.
 /image-edit message=12 workflow="Edit.json" chat=false Give her an amused smile.
 /image-edit Give her an amused smile.
+/image-edit reference="/user/images/person.png" reference="/user/images/outfit.png" workflow="TwoImages.json" Put the person in this outfit.
 ```
 
-By default, `attached=true` uses the image currently attached to the message
-composer, before sending. If no image is attached, it falls back to
+By default, `attached=true` uses all images currently attached to the message
+composer in attachment order, before sending. If no image is attached, it falls back to
 `message={{lastMessageID}}`, the last message in the current chat. Image selection
 fails if neither has an image; it does not search earlier messages.
 Use `attached=false` to skip the composer. To select an explicit source, supply
 `reference=` (a same-origin image URL or PNG/JPEG/WebP base64 data URL) or
 `message=` (a zero-based ID of a chat message with an image attachment).
 An explicit source overrides the default composer selection.
-For composer images, attach exactly one image;
-other non-image files may also be attached. The original composer attachment
-stays unchanged. `workflow=` defaults to the active ComfyUI workflow. Optional
+Repeat `reference=` to supply multiple URLs, or repeat `message=` to take one
+selected image from each specified message, in argument order. Each message
+uses its selected gallery image (or first image if the selection is not an
+image). Composer images use attachment order; non-image files are ignored.
+The original composer attachments stay unchanged. `workflow=` defaults to the active ComfyUI workflow. Optional
 arguments are `prompt="..."` instead of trailing text, `negative="..."`,
 `seed=12345`, `width=704`, `height=1280`, and `chat=false`. Dimensions fill
 placeholders only; literal dimensions in the graph stay as they are. The
@@ -68,12 +77,17 @@ const url = await edit({
 });
 ```
 
+For multiple inputs, pass `references: [urlOrBlob1, urlOrBlob2, ...]` instead of
+`reference`. An array in `reference` also works. Do not supply both fields.
+The array order maps to the numbered placeholders; the array is copied when
+the job is accepted so later caller changes do not alter queued jobs.
+
 That import path assumes the extension is installed for all users under the
 `st-image-edit` folder. Per-user installations have a different served path.
 
 ## Included example workflow
 
-[`workflows/flux2_9b_edit.json`](workflows/flux2_9b_edit.json) is an API-format
+[`workflows/flux2_9b_edit.json`](workflows/flux2_9b_edit.json) is a single-reference API-format
 Flux.2 Klein 9B edit graph. Its sampling, reference conditioning, and image
 output use ComfyUI core nodes. It needs one custom node, `Base64DecodeNode` from
 `comfyui-logicutils`, to receive the reference image. It also needs these model
@@ -89,6 +103,29 @@ Then try:
 This graph scales the reference to about one megapixel and uses that size for
 the result. It has no `%width%` or `%height%` inputs. The model can still change
 pose, framing, clothing, and other details.
+
+### Two-reference example
+
+[`workflows/flux2_9b_edit_2ref.json`](workflows/flux2_9b_edit_2ref.json) uses the
+same models, custom decoder, and sampling settings with two reference images.
+Import it through SillyTavern's ComfyUI workflow editor, then attach two images
+and run:
+
+```text
+/image-edit workflow="flux2_9b_edit_2ref.json" Put the person from image 1 in the outfit from image 2.
+```
+
+Or supply two explicit URLs:
+
+```text
+/image-edit reference="/user/images/person.png" reference="/user/images/outfit.png" workflow="flux2_9b_edit_2ref.json" Put the person from image 1 in the outfit from image 2.
+```
+
+Both references are independently scaled to about one megapixel and encoded
+with the same VAE. Both feed the positive and negative reference conditioning
+chains, in image order. Output dimensions come from the scaled first image.
+This workflow requires exactly two references and uses more memory than the
+single-reference example.
 
 ## Privacy and limits
 
