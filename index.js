@@ -1,6 +1,6 @@
 import { eventSource, event_types, getMediaIndex, getRequestHeaders } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
-import { getBase64Async, isTrueBoolean, saveBase64AsFile } from '../../../utils.js';
+import { getBase64Async, isTrueBoolean, saveBase64AsFile, uuidv4 } from '../../../utils.js';
 import { getMessageTimeStamp } from '../../../RossAscends-mods.js';
 import { getLastMessageId } from '../../../macros.js';
 import { MEDIA_DISPLAY, MEDIA_SOURCE, MEDIA_TYPE } from '../../../constants.js';
@@ -22,7 +22,7 @@ export const edit = createEditor({
     encode: getBase64Async,
     save: saveBase64AsFile,
     origin: location.origin,
-    makeId: () => crypto.randomUUID(),
+    makeId: uuidv4,
     randomSeed: () => {
         const words = crypto.getRandomValues(new Uint32Array(2));
         return (words[0] & 0x1fffff) * 0x100000000 + words[1];

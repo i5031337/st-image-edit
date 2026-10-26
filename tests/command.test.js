@@ -14,6 +14,7 @@ test('command resolves references and handles posting, failures, chat switches a
     const events = [];
     const references = [];
     const workflowRequests = [];
+    const generatedIds = [];
     let chatId = 'original-chat';
     let characterId = 1;
     let chatSaves = 0;
@@ -28,7 +29,9 @@ test('command resolves references and handles posting, failures, chat switches a
     });
     const context = vm.createContext({
         Blob, URL, AbortController, DOMException, Uint32Array,
-        crypto: webcrypto, location: { origin: 'http://st.local' },
+        // Remote HTTP exposes getRandomValues but not the secure-context randomUUID API.
+        crypto: { getRandomValues: array => webcrypto.getRandomValues(array) },
+        location: { origin: 'http://st.local' },
         document: { getElementById: id => id === 'file_form_input' ? composer : null },
         toastr: {
             error: (...args) => errors.push(args),
@@ -79,6 +82,11 @@ test('command resolves references and handles posting, failures, chat switches a
             MEDIA_SOURCE: { GENERATED: 'generated' },
         },
         '../../../utils.js': {
+            uuidv4: () => {
+                const id = webcrypto.randomUUID();
+                generatedIds.push(id);
+                return id;
+            },
             isTrueBoolean: value => String(value).toLowerCase() === 'true',
             getBase64Async: async blob => `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString('base64')}`,
             saveBase64AsFile: async (...args) => {
@@ -125,6 +133,8 @@ test('command resolves references and handles posting, failures, chat switches a
     const url = await commands[0].callback(args, 'smile');
     assert.match(url, /^\/user\/images\/image-edit\/[a-f0-9-]+\.png$/);
     assert.equal(saves.length, 1);
+    assert.equal(generatedIds.length, 1);
+    assert.equal(saves[0][2], generatedIds[0]);
     assert.equal(typeof entry.namespace.edit, 'function');
     assert.deepEqual(sd, originalSettings);
     await assert.rejects(commands[0].callback({ ...args, workflow: 'missing.json' }, 'smile'), /not found/);
