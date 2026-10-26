@@ -1,6 +1,6 @@
 import { populateWorkflow } from './workflow.js';
+import { stripReferenceMetadata } from './image.js';
 
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const OUTPUT_FORMATS = new Set(['png', 'jpg', 'jpeg', 'webp']);
 
@@ -32,19 +32,15 @@ async function loadReference(reference, { fetch, encode, origin }, signal) {
         if (!isData && (url.origin !== origin || !['http:', 'https:'].includes(url.protocol))) {
             throw new Error('Reference must be a same-origin URL or a PNG/JPEG/WebP base64 data URL.');
         }
-        if (isData && reference.length > Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 100) {
-            throw new Error('Reference image exceeds 20 MiB.');
-        }
         const response = await fetch(url.href, { signal, redirect: 'error' });
         if (!response.ok) throw new Error(`Could not load reference image (${response.status}).`);
-        if (Number(response.headers.get('content-length')) > MAX_IMAGE_BYTES) {
-            throw new Error('Reference image exceeds 20 MiB.');
-        }
         blob = await response.blob();
     }
     checkAbort(signal);
     if (!IMAGE_TYPES.has(blob.type.toLowerCase())) throw new Error('Reference must be PNG, JPEG, or WebP.');
-    if (!blob.size || blob.size > MAX_IMAGE_BYTES) throw new Error('Reference must contain image data under 20 MiB.');
+    if (!blob.size) throw new Error('Reference must contain image data.');
+    blob = await stripReferenceMetadata(blob);
+    checkAbort(signal);
     const dataUrl = await encode(blob);
     checkAbort(signal);
     return dataUrl.slice(dataUrl.indexOf(',') + 1);

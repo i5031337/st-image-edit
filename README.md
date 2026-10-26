@@ -44,11 +44,18 @@ stays unchanged. `workflow=` defaults to the active ComfyUI workflow. Optional
 arguments are `prompt="..."` instead of trailing text, `negative="..."`,
 `seed=12345`, `width=704`, `height=1280`, and `chat=false`. Dimensions fill
 placeholders only; literal dimensions in the graph stay as they are. The
-reference limit is 20 MiB.
+extension imposes no reference file-size limit. Large images remain subject to
+browser memory and SillyTavern/ComfyUI request limits; base64 encoding increases
+the transferred size by about one third.
 
 The command returns a `/user/images/image-edit/...` URL and posts the result to
 chat (`chat=true` by default). Use `chat=false` to save and return the URL only.
-The reference stays unchanged.
+The original reference stays unchanged. Before sending a PNG reference to
+ComfyUI, the extension removes text metadata from the transmitted copy to avoid
+nesting previous workflows and base64 references inside each new output. Pixel
+data, transparency, and color profiles are preserved without recompression.
+JPEG and WebP references pass through unchanged. Generated outputs retain the
+metadata supplied by ComfyUI, including the most recent workflow.
 
 Other extensions can import the same function:
 

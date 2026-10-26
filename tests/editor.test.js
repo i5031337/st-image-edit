@@ -38,6 +38,7 @@ function fixture(options = {}) {
         },
         fetch: async (url, init) => {
             requests.push({ url, ...init, body: init?.body ? JSON.parse(init.body) : undefined });
+            if (url.startsWith('data:')) return fetch(url, init);
             switch (url) {
                 case '/api/sd/comfy/workflows': return Response.json(options.files ?? ['Edit.json']);
                 case '/api/sd/comfy/workflow': return Response.json(options.workflow ?? json);
@@ -45,7 +46,9 @@ function fixture(options = {}) {
                     if (options.generate) return options.generate(init);
                     return Response.json({ format: 'png', data: 'output-base64' });
                 case 'http://st.local/user/images/reference.png':
-                    return new Response(reference);
+                    return new Response(options.reference ?? reference, {
+                        headers: { 'Content-Length': String((options.reference ?? reference).size) },
+                    });
                 default: throw new Error(`Unexpected request: ${url}`);
             }
         },
@@ -232,9 +235,9 @@ test('missing workflow and invalid graph never generate or save', async () => {
     assert.equal(f.saves.length, 0);
 });
 
-test('rejects external URLs, unsupported MIME, oversized references, and unsafe seeds', async () => {
+test('rejects external URLs, unsupported MIME, empty references, and unsafe seeds', async () => {
     for (const badReference of ['https://elsewhere.local/image.png', 'file:///tmp/image.png',
-        new Blob(['text'], { type: 'text/plain' }), new Blob([new Uint8Array(20 * 1024 * 1024 + 1)], { type: 'image/png' })]) {
+        new Blob(['text'], { type: 'text/plain' }), new Blob([], { type: 'image/png' })]) {
         const f = fixture();
         await assert.rejects(f.edit({ ...input, reference: badReference }));
         assert.equal(f.saves.length, 0);
@@ -244,6 +247,18 @@ test('rejects external URLs, unsupported MIME, oversized references, and unsafe 
         await assert.rejects(fixture().edit({ ...input, seed }), /Seed/);
     }
     await assert.rejects(fixture({ deps: { getDefaults: () => ({}) } }).edit(input), /ComfyUI URL/);
+});
+
+test('accepts references over the former 20 MiB limit as blobs, URLs, and data URLs', async () => {
+    const large = new Blob([new Uint8Array(20 * 1024 * 1024 + 1)], { type: 'image/png' });
+    const base64 = Buffer.from(await large.arrayBuffer()).toString('base64');
+    for (const source of [large, 'http://st.local/user/images/reference.png', `data:image/png;base64,${base64}`]) {
+        const f = fixture({ reference: large });
+        await f.edit({ ...input, reference: source });
+        const request = f.requests.find(r => r.url.endsWith('/generate'));
+        assert.equal(JSON.parse(request.body.prompt).prompt['1'].inputs.image, base64);
+        assert.equal(f.saves.length, 1);
+    }
 });
 
 test('serializes immutable jobs and snapshots backend defaults on acceptance', async () => {
