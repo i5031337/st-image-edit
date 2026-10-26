@@ -73,6 +73,7 @@ test('command resolves references and handles posting, failures, chat switches a
             }),
         },
         '../../../RossAscends-mods.js': { getMessageTimeStamp: () => 'fixture-timestamp' },
+        '../../../macros.js': { getLastMessageId: () => messages.length ? messages.length - 1 : null },
         '../../../constants.js': {
             MEDIA_TYPE: { IMAGE: 'image' }, MEDIA_DISPLAY: { GALLERY: 'gallery' },
             MEDIA_SOURCE: { GENERATED: 'generated' },
@@ -117,7 +118,7 @@ test('command resolves references and handles posting, failures, chat switches a
     assert.equal(commands[0].name, 'image-edit');
     assert.equal(commands[0].namedArgumentList.find(arg => arg.name === 'workflow').isRequired, false);
     assert.deepEqual(Array.from(commands[0].namedArgumentList.find(arg => arg.name === 'attached').typeList), ['bool']);
-    const args = { reference: 'data:image/png;base64,Ynl0ZXM=', workflow: 'Edit.json', width: '832', height: '1216' };
+    const args = { reference: 'data:image/png;base64,Ynl0ZXM=', workflow: 'Edit.json', width: '832', height: '1216', chat: false };
     for (const name of ['width', 'height']) {
         assert.deepEqual(Array.from(commands[0].namedArgumentList.find(arg => arg.name === name).typeList), ['number']);
     }
@@ -219,7 +220,7 @@ test('command resolves references and handles posting, failures, chat switches a
     await assert.rejects(commands[0].callback({ ...fromMessage, message: 99 }, 'smile'), /does not exist/);
     await assert.rejects(commands[0].callback({ ...fromMessage, message: 3 }, 'smile'), /no attached image/);
     await assert.rejects(commands[0].callback({ ...args, message: 1 }, 'smile'), /exactly one/);
-    await assert.rejects(commands[0].callback({ ...args, reference: undefined }, 'smile'), /reference= or message=/);
+    await assert.rejects(commands[0].callback({ ...args, reference: undefined }, 'smile'), /no attached image/);
     chatId = null;
     await assert.rejects(commands[0].callback(fromMessage, 'smile'), /Open a chat/);
     assert.equal(generationCount, countBeforeInvalidMessage);
@@ -247,9 +248,9 @@ test('command resolves references and handles posting, failures, chat switches a
     assert.equal(references.at(-1), Buffer.from('composer image').toString('base64'));
 
     const beforeInvalidAttachment = generationCount;
-    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /Attach an image/);
+    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /Open a chat/);
     composer.files = [textFile];
-    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /Attach an image/);
+    await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /Open a chat/);
     composer.files = [attachment, attachment];
     await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /exactly one image/);
     composer.files = [new Blob(['gif'], { type: 'image/gif' })];
@@ -265,4 +266,44 @@ test('command resolves references and handles posting, failures, chat switches a
     const attachedPosted = await commands[0].callback({ ...fromAttachment, chat: true }, 'smile');
     assert.equal(messages.at(-1).extra.media[0].url, attachedPosted);
     assert.equal(composer.files[0], attachment);
+
+    // Defaults select the composer and post to chat without any source/chat arguments.
+    const automatic = { ...args, reference: undefined, chat: undefined };
+    const defaultPosted = await commands[0].callback(automatic, 'smile');
+    assert.equal(references.at(-1), Buffer.from('composer image').toString('base64'));
+    assert.equal(messages.at(-1).extra.media[0].url, defaultPosted);
+    assert.equal(composer.files[0], attachment);
+
+    // Explicit sources still override the composer when attached= is omitted.
+    await commands[0].callback(args, 'smile');
+    assert.equal(references.at(-1), 'Ynl0ZXM=');
+    await commands[0].callback(fromMessage, 'smile');
+    assert.equal(references.at(-1), 'c2VsZWN0ZWQ=');
+
+    // attached=false skips the composer and uses exactly the last message.
+    messages.push({ extra: { image: legacyImage } });
+    await commands[0].callback({ ...automatic, attached: false, chat: false }, 'smile');
+    assert.equal(references.at(-1), 'bGVnYWN5');
+
+    // Missing composer images fall back for both implicit and explicit attached=true.
+    for (const files of [[], [textFile]]) {
+        composer.files = files;
+        for (const attached of [undefined, 'true']) {
+            await commands[0].callback({ ...automatic, attached, chat: 'false' }, 'smile');
+            assert.equal(references.at(-1), 'bGVnYWN5');
+        }
+    }
+    messages.push({ mes: 'No image on the last message' });
+    const beforeMissingImages = generationCount;
+    await assert.rejects(commands[0].callback(automatic, 'smile'), /no attached image/);
+    assert.equal(generationCount, beforeMissingImages);
+
+    // A composer image succeeds even when the last message has no image.
+    composer.files = [attachment];
+    await commands[0].callback({ ...automatic, chat: false }, 'smile');
+    assert.equal(references.at(-1), Buffer.from('composer image').toString('base64'));
+
+    composer.files = [];
+    messages.length = 0;
+    await assert.rejects(commands[0].callback(automatic, 'smile'), /No reference image found/);
 });

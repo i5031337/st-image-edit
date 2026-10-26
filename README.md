@@ -1,7 +1,7 @@
 # Image Edit for SillyTavern
 
 Edit an image with a saved ComfyUI workflow using `/image-edit`. The command
-returns a saved image URL; posting it to chat is optional.
+returns a saved image URL and posts the result to chat by default.
 
 ## Install
 
@@ -26,23 +26,29 @@ only the result you want saved.
 
 ```text
 /image-edit reference="/user/images/reference.png" Give her an amused smile.
-/image-edit message=12 workflow="Edit.json" chat=true Give her an amused smile.
-/image-edit attached=true Give her an amused smile.
+/image-edit message=12 workflow="Edit.json" chat=false Give her an amused smile.
+/image-edit Give her an amused smile.
 ```
 
-Supply exactly one of `reference=` (a same-origin image URL or PNG/JPEG/WebP
-base64 data URL), `message=` (a zero-based ID of a chat message with an image
-attachment), or `attached=true` (the image currently attached to the message
-composer, before sending). For `attached=true`, attach exactly one image;
+By default, `attached=true` uses the image currently attached to the message
+composer, before sending. If no image is attached, it falls back to
+`message={{lastMessageID}}`, the last message in the current chat. Image selection
+fails if neither has an image; it does not search earlier messages.
+Use `attached=false` to skip the composer. To select an explicit source, supply
+`reference=` (a same-origin image URL or PNG/JPEG/WebP base64 data URL) or
+`message=` (a zero-based ID of a chat message with an image attachment).
+An explicit source overrides the default composer selection.
+For composer images, attach exactly one image;
 other non-image files may also be attached. The original composer attachment
 stays unchanged. `workflow=` defaults to the active ComfyUI workflow. Optional
 arguments are `prompt="..."` instead of trailing text, `negative="..."`,
-`seed=12345`, `width=704`, `height=1280`, and `chat=true`. Dimensions fill
+`seed=12345`, `width=704`, `height=1280`, and `chat=false`. Dimensions fill
 placeholders only; literal dimensions in the graph stay as they are. The
 reference limit is 20 MiB.
 
-The command returns a `/user/images/image-edit/...` URL. It saves the result
-without changing the reference or posting to chat unless `chat=true` is used.
+The command returns a `/user/images/image-edit/...` URL and posts the result to
+chat (`chat=true` by default). Use `chat=false` to save and return the URL only.
+The reference stays unchanged.
 
 Other extensions can import the same function:
 
