@@ -37,15 +37,20 @@ async function command(args, text) {
     if (args._abortController?.signal.aborted) abort();
     try {
         const attached = isTrueBoolean(args.attached);
-        if ([args.reference !== undefined, args.message !== undefined, attached].filter(Boolean).length > 1) {
-            throw new Error('Supply exactly one of reference=, message=, and attached=true.');
+        const explicit = args.reference !== undefined || args.message !== undefined;
+        // Group sources in workflow order; capture every input before awaiting the job.
+        const reference = [];
+        if (attached || (args.attached === undefined && !explicit)) {
+            reference.push(...(attachedReference() ?? []));
         }
-        // Explicit sources override the automatic composer/last-message selection.
-        const reference = args.reference !== undefined ? args.reference
-            : args.message !== undefined ? (Array.isArray(args.message) ? args.message : [args.message]).map(messageReference)
-                : (args.attached === undefined || attached ? attachedReference() : undefined)
-                    ?? lastMessageReference();
-        if (!reference) throw new Error('No reference image found. Attach an image or use reference= or message=.');
+        if (args.message !== undefined) {
+            reference.push(...(Array.isArray(args.message) ? args.message : [args.message]).map(messageReference));
+        }
+        if (args.reference !== undefined) {
+            reference.push(...(Array.isArray(args.reference) ? args.reference : [args.reference]));
+        }
+        if (!explicit && !reference.length) reference.push(lastMessageReference());
+        if (!reference.length) throw new Error('No reference image found. Attach an image or use reference= or message=.');
         const target = args.chat === undefined || isTrueBoolean(args.chat) ? getContext() : null;
         const chatId = target?.getCurrentChatId();
         if (target && !chatId) throw new Error('Open a chat before using chat=true.');
@@ -133,7 +138,7 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
     namedArgumentList: [
         argument('reference', 'Image URL or base64 data URL; repeat reference= for multiple images in order', false, ARGUMENT_TYPE.STRING, true),
         argument('message', 'Message ID to take the selected image from; repeat message= for multiple images in order', false, ARGUMENT_TYPE.NUMBER, true),
-        argument('attached', 'Use all composer images in attachment order, falling back to the last message (default: true; explicit reference= or message= overrides)', false, ARGUMENT_TYPE.BOOLEAN),
+        argument('attached', 'Include all composer images first; use attached=true to combine with message= or reference= (default: use composer, then last message, when no explicit source)', false, ARGUMENT_TYPE.BOOLEAN),
         argument('workflow', 'Saved workflow filename (defaults to the active ST ComfyUI workflow)'),
         argument('prompt', 'Editing instruction (alternatively use trailing text)'),
         argument('negative', 'Optional negative prompt'),
@@ -146,5 +151,5 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         description: 'Editing instruction when prompt= is omitted', typeList: [ARGUMENT_TYPE.STRING],
         isRequired: false,
     })],
-    helpString: '<p>Edit a reference using a saved ComfyUI workflow. Defaults to attached=true: use all composer images in attachment order, falling back to message={{lastMessageID}} if none is attached. Use reference= or message= (zero-based chat message ID) to select an explicit source, or attached=false to skip the composer. Workflow defaults to the active ST ComfyUI workflow; use workflow= to override. Returns a saved URL and posts to chat by default; use chat=false for URL only. The original composer attachment stays unchanged.</p><p>Required inputs: %prompt% and %reference_image_1%, %reference_image_2%, etc. (raw base64), one per supplied image. %reference_image% is an alias for image 1. Repeat reference= or message= for multiple explicit sources. The workflow must use every supplied reference. Optional: %negative_prompt%, %seed%, %width%, %height%. Each placeholder fills a whole JSON string value. Dimensions default to ST Image Generation settings; literal workflow dimensions stay unchanged.</p><p><code>/image-edit Give her an amused smile.</code></p><p><code>/image-edit message=12 chat=false width=704 height=1280 Give her an amused smile.</code></p>',
+    helpString: '<p>Edit a reference using a saved ComfyUI workflow. Defaults to attached=true: use all composer images in attachment order, falling back to message={{lastMessageID}} if none is attached. Combine reference= and message= (zero-based chat message ID) freely; add attached=true to include composer images too. Image order is composer attachments, then message= images, then reference= URLs, preserving order within each group. Explicit sources skip the composer unless attached=true; an empty composer adds no last-message fallback when explicit sources are supplied. Use attached=false to skip the composer. Workflow defaults to the active ST ComfyUI workflow; use workflow= to override. Returns a saved URL and posts to chat by default; use chat=false for URL only. The original composer attachment stays unchanged.</p><p>Required inputs: %prompt% and %reference_image_1%, %reference_image_2%, etc. (raw base64), one per supplied image. %reference_image% is an alias for image 1. Repeat reference= or message= for multiple explicit sources. The workflow must use every supplied reference. Optional: %negative_prompt%, %seed%, %width%, %height%. Each placeholder fills a whole JSON string value. Dimensions default to ST Image Generation settings; literal workflow dimensions stay unchanged.</p><p><code>/image-edit Give her an amused smile.</code></p><p><code>/image-edit message=12 chat=false width=704 height=1280 Give her an amused smile.</code></p><p><code>/image-edit attached=true message=12 workflow="flux2_9b_edit_2ref.json" Put the person from image 1 in the outfit from image 2.</code></p>',
 }));

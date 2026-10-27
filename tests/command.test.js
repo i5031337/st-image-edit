@@ -231,7 +231,7 @@ test('command resolves references and handles posting, failures, chat switches a
     }
     await assert.rejects(commands[0].callback({ ...fromMessage, message: 99 }, 'smile'), /does not exist/);
     await assert.rejects(commands[0].callback({ ...fromMessage, message: 3 }, 'smile'), /no attached image/);
-    await assert.rejects(commands[0].callback({ ...args, message: 1 }, 'smile'), /exactly one/);
+    await assert.rejects(commands[0].callback({ ...args, message: 1 }, 'smile'), /%reference_image_2%/);
     await assert.rejects(commands[0].callback({ ...args, reference: undefined }, 'smile'), /no attached image/);
     chatId = null;
     await assert.rejects(commands[0].callback(fromMessage, 'smile'), /Open a chat/);
@@ -268,8 +268,8 @@ test('command resolves references and handles posting, failures, chat switches a
     composer.files = [new Blob(['gif'], { type: 'image/gif' })];
     await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /PNG, JPEG, or WebP/);
     composer.files = [attachment];
-    await assert.rejects(commands[0].callback({ ...args, attached: true }, 'smile'), /exactly one/);
-    await assert.rejects(commands[0].callback({ ...fromAttachment, message: 1 }, 'smile'), /exactly one/);
+    await assert.rejects(commands[0].callback({ ...args, attached: true }, 'smile'), /%reference_image_2%/);
+    await assert.rejects(commands[0].callback({ ...fromAttachment, message: 1 }, 'smile'), /Open a chat/);
     assert.equal(generationCount, beforeInvalidAttachment);
 
     await commands[0].callback({ ...args, attached: 'false' }, 'smile');
@@ -333,6 +333,43 @@ test('command resolves references and handles posting, failures, chat switches a
     await commands[0].callback({ ...fromMessage, message: [2, 1] }, 'combine');
     assert.equal(generatedGraphs.at(-1)['1'].inputs.image, 'bGVnYWN5');
     assert.equal(generatedGraphs.at(-1)['3'].inputs.image, 'c2VsZWN0ZWQ=');
+
+    // Every pair of source types works, regardless of named argument order.
+    composer.files = [attachment];
+    const composerBase64 = Buffer.from('composer image').toString('base64');
+    for (const [sources, expected] of [
+        [{ reference: undefined, message: 1, attached: true }, [composerBase64, 'c2VsZWN0ZWQ=']],
+        [{ reference: legacyImage, attached: 'true' }, [composerBase64, 'bGVnYWN5']],
+        [{ reference: legacyImage, message: 1 }, ['c2VsZWN0ZWQ=', 'bGVnYWN5']],
+        [{ reference: legacyImage, message: 1, attached: false }, ['c2VsZWN0ZWQ=', 'bGVnYWN5']],
+    ]) {
+        await commands[0].callback({ ...args, ...sources }, 'combine');
+        assert.deepEqual([generatedGraphs.at(-1)['1'].inputs.image, generatedGraphs.at(-1)['3'].inputs.image], expected);
+    }
+
+    // Repeated sources keep their internal order when all three types are mixed.
+    for (let index = 3; index <= 6; index++) {
+        multiGraph[String(index + 1)] = { class_type: 'Base64DecodeNode', inputs: { image: `%reference_image_${index}%` } };
+    }
+    workflow = JSON.stringify(multiGraph);
+    composer.files = [attachment, textFile, secondAttachment];
+    const mixedPending = commands[0].callback({
+        ...args, reference: [legacyImage, selectedImage], message: [1, 2], attached: true,
+    }, 'combine');
+    composer.files = [];
+    await mixedPending;
+    const mixedGraph = generatedGraphs.at(-1);
+    assert.deepEqual(['1', '3', '4', '5', '6', '7'].map(id => mixedGraph[id].inputs.image), [
+        composerBase64, Buffer.from('second image').toString('base64'),
+        'c2VsZWN0ZWQ=', 'bGVnYWN5', 'bGVnYWN5', 'c2VsZWN0ZWQ=',
+    ]);
+
+    // With explicit inputs, an empty composer does not add a last-message fallback.
+    workflow = singleWorkflow;
+    await commands[0].callback({ ...fromMessage, attached: true }, 'smile');
+    assert.equal(references.at(-1), 'c2VsZWN0ZWQ=');
+    await commands[0].callback({ ...args, attached: true }, 'smile');
+    assert.equal(references.at(-1), 'Ynl0ZXM=');
     for (const name of ['reference', 'message']) {
         assert.equal(commands[0].namedArgumentList.find(arg => arg.name === name).acceptsMultiple, true);
     }

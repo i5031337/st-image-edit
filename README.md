@@ -35,6 +35,8 @@ only the result you want saved.
 /image-edit message=12 workflow="Edit.json" chat=false Give her an amused smile.
 /image-edit Give her an amused smile.
 /image-edit reference="/user/images/person.png" reference="/user/images/outfit.png" workflow="TwoImages.json" Put the person in this outfit.
+
+/image-edit attached=true message=12 workflow="flux2_9b_edit_2ref.json" Put the person from image 1 in the outfit from image 2.
 ```
 
 By default, `attached=true` uses all images currently attached to the message
@@ -44,9 +46,15 @@ fails if neither has an image; it does not search earlier messages.
 Use `attached=false` to skip the composer. To select an explicit source, supply
 `reference=` (a same-origin image URL or PNG/JPEG/WebP base64 data URL) or
 `message=` (a zero-based ID of a chat message with an image attachment).
-An explicit source overrides the default composer selection.
+You can combine `reference=` and `message=` freely. Add `attached=true` to
+include composer images alongside either or both explicit sources. Explicit
+sources skip the composer when `attached=` is omitted. With explicit sources,
+an empty composer contributes no images and does not trigger the last-message fallback.
 Repeat `reference=` to supply multiple URLs, or repeat `message=` to take one
-selected image from each specified message, in argument order. Each message
+selected image from each specified message. References are ordered by source:
+composer attachments first, then `message=` images, then `reference=` URLs,
+preserving order within each group regardless of the order of named arguments.
+Each message
 uses its selected gallery image (or first image if the selection is not an
 image). Composer images use attachment order; non-image files are ignored.
 The original composer attachments stay unchanged. `workflow=` defaults to the active ComfyUI workflow. Optional
