@@ -8,6 +8,7 @@ import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { createEditor } from './editor.js';
+import { isHeicFile } from './image.js';
 
 // Other extensions may import this function directly; it returns the saved URL.
 export const edit = createEditor({
@@ -78,7 +79,7 @@ async function command(args, text) {
 function attachedReference() {
     // Capture the File now: the composer may be cleared or changed while the job waits.
     const files = Array.from(document.getElementById('file_form_input')?.files ?? []);
-    const images = files.filter(file => file.type.toLowerCase().startsWith('image/'));
+    const images = files.filter(file => file.type.toLowerCase().startsWith('image/') || isHeicFile(file));
     return images.length ? images : undefined;
 }
 

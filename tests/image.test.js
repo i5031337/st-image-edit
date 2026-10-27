@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
-import { stripReferenceMetadata } from '../image.js';
+import { isHeicBlob, isHeicFile, stripReferenceMetadata } from '../image.js';
 import { createEditor } from '../editor.js';
 
 function chunk(type, data = Buffer.alloc(0)) {
@@ -37,6 +37,19 @@ const annotated = Buffer.concat([
     chunk('iTXt', Buffer.from('description\0\0\0\0\0previous edit')),
     end,
 ]);
+
+test('recognizes HEIC MIME, filenames, and container signatures without mistaking AVIF for HEIC', async () => {
+    assert.ok(isHeicFile({ type: '', name: 'IMG_1234.HEIC' }));
+    assert.ok(isHeicFile({ type: 'application/octet-stream', name: 'photo.heif' }));
+    assert.ok(isHeicFile({ type: 'image/heic-sequence' }));
+    assert.equal(isHeicFile({ type: '', name: 'photo.heic.txt' }), false);
+    for (const brand of ['heic', 'heix', 'mif1', 'msf1']) {
+        assert.ok(await isHeicBlob(new Blob([Buffer.from([0, 0, 0, 24]), `ftyp${brand}`])));
+    }
+    for (const bytes of ['xxxxftypavif', 'xxxxnopeheic', 'heic', '']) {
+        assert.equal(await isHeicBlob(new Blob([bytes])), false);
+    }
+});
 
 test('removes every PNG text chunk and preserves all other bytes and the original', async () => {
     const original = new Blob([annotated], { type: 'image/png' });

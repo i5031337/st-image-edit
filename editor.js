@@ -1,5 +1,5 @@
 import { populateWorkflow } from './workflow.js';
-import { stripReferenceMetadata } from './image.js';
+import { convertHeicToPng, isHeicBlob, stripReferenceMetadata } from './image.js';
 
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const OUTPUT_FORMATS = new Set(['png', 'jpg', 'jpeg', 'webp']);
@@ -19,7 +19,7 @@ function integer(value, name, minimum) {
     return number;
 }
 
-async function loadReference(reference, { fetch, encode, origin }, signal) {
+async function loadReference(reference, { fetch, encode, origin, convertHeic = convertHeicToPng }, signal) {
     let blob;
     if (reference instanceof Blob) {
         blob = reference;
@@ -28,17 +28,30 @@ async function loadReference(reference, { fetch, encode, origin }, signal) {
             throw new Error('Supply a reference image URL or Blob.');
         }
         const url = new URL(reference, origin);
-        const isData = /^data:image\/(png|jpeg|webp);base64,/i.test(reference);
+        const isData = /^data:image\/(png|jpeg|webp|heic|heif|heic-sequence|heif-sequence);base64,/i.test(reference);
         if (!isData && (url.origin !== origin || !['http:', 'https:'].includes(url.protocol))) {
-            throw new Error('Reference must be a same-origin URL or a PNG/JPEG/WebP base64 data URL.');
+            throw new Error('Reference must be a same-origin URL or a PNG/JPEG/WebP/HEIC/HEIF base64 data URL.');
         }
         const response = await fetch(url.href, { signal, redirect: 'error' });
         if (!response.ok) throw new Error(`Could not load reference image (${response.status}).`);
         blob = await response.blob();
     }
     checkAbort(signal);
-    if (!IMAGE_TYPES.has(blob.type.toLowerCase())) throw new Error('Reference must be PNG, JPEG, or WebP.');
     if (!blob.size) throw new Error('Reference must contain image data.');
+    if (await isHeicBlob(blob)) {
+        checkAbort(signal);
+        try {
+            blob = await convertHeic(blob);
+            if (!(blob instanceof Blob) || blob.type !== 'image/png' || !blob.size) {
+                throw new Error('Decoder did not return a PNG image.');
+            }
+        } catch (error) {
+            checkAbort(signal);
+            throw new Error(`Could not convert HEIC/HEIF reference to PNG: ${error.message ?? error}`);
+        }
+        checkAbort(signal);
+    }
+    if (!IMAGE_TYPES.has(blob.type.toLowerCase())) throw new Error('Reference must be PNG, JPEG, or WebP, or HEIC/HEIF.');
     blob = await stripReferenceMetadata(blob);
     checkAbort(signal);
     const dataUrl = await encode(blob);

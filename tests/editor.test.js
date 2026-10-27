@@ -224,6 +224,55 @@ test('accepts data URLs and preserves WebP output', async () => {
     assert.equal(f.saves[0][3], 'webp');
 });
 
+test('converts HEIC blobs, generic MIME URLs, and HEIF data URLs before encoding', async () => {
+    const bytes = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypheic')]);
+    const converted = new Blob(['converted PNG bytes'], { type: 'image/png' });
+    for (const source of [
+        new Blob([bytes], { type: 'image/heic' }),
+        '/user/images/reference.png',
+        `data:image/heif;base64,${bytes.toString('base64')}`,
+    ]) {
+        let conversions = 0;
+        const f = fixture({
+            reference: new Blob([bytes], { type: 'application/octet-stream' }),
+            deps: { convertHeic: async blob => {
+                conversions++;
+                assert.deepEqual(Buffer.from(await blob.arrayBuffer()), bytes);
+                return converted;
+            } },
+        });
+        await f.edit({ ...input, reference: source });
+        assert.equal(conversions, 1);
+        const request = f.requests.find(r => r.url.endsWith('/generate'));
+        assert.equal(JSON.parse(request.body.prompt).prompt['1'].inputs.image,
+            Buffer.from('converted PNG bytes').toString('base64'));
+    }
+    const f = fixture({ deps: { convertHeic: () => { throw new Error('should not convert PNG'); } } });
+    await f.edit(input);
+});
+
+test('conversion failure and cancellation prevent generation and leave the queue usable', async () => {
+    const heic = new Blob(['HEIC'], { type: 'image/heic' });
+    for (const convertHeic of [
+        async () => { throw new Error('broken file'); },
+        async () => null,
+        async () => new Blob([], { type: 'image/png' }),
+    ]) {
+        const f = fixture({ deps: { convertHeic } });
+        await assert.rejects(f.edit({ ...input, reference: heic }), /Could not convert HEIC\/HEIF/);
+        assert.ok(!f.requests.some(r => r.url.endsWith('/generate')));
+        await f.edit(input);
+        assert.equal(f.saves.length, 1);
+    }
+    const controller = new AbortController();
+    const f = fixture({ deps: { convertHeic: async () => {
+        controller.abort();
+        return new Blob(['PNG'], { type: 'image/png' });
+    } } });
+    await assert.rejects(f.edit({ ...input, reference: heic, signal: controller.signal }), { name: 'AbortError' });
+    assert.ok(!f.requests.some(r => r.url.endsWith('/generate')));
+});
+
 test('missing workflow and invalid graph never generate or save', async () => {
     const missing = fixture();
     await assert.rejects(missing.edit({ ...input, workflow: 'Missing.json' }), /not found/);

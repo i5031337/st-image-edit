@@ -74,6 +74,14 @@ data, transparency, and color profiles are preserved without recompression.
 JPEG and WebP references pass through unchanged. Generated outputs retain the
 metadata supplied by ComfyUI, including the most recent workflow.
 
+HEIC/HEIF references are also supported, including `.heic`/`.heif` composer
+attachments with no image MIME type. They are converted locally to PNG before
+sending to ComfyUI; the original file stays unchanged. The bundled decoder
+loads only when needed, with no CDN or external conversion service. Conversion
+uses the primary image (not every frame) and does not preserve the original
+HEIC metadata or HDR/color profile. Large photos can take extra time and memory.
+See [decoder notices](vendor/heic-to/README.md).
+
 Other extensions can import the same function:
 
 ```js

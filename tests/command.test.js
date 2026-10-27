@@ -109,7 +109,22 @@ test('command resolves references and handles posting, failures, chat switches a
     async function sourceModule(filename) {
         if (cache.has(filename)) return cache.get(filename);
         const source = await readFile(new URL(`../${filename}`, import.meta.url), 'utf8');
-        const module = new vm.SourceTextModule(source, { context, identifier: filename });
+        const module = new vm.SourceTextModule(source, {
+            context, identifier: filename,
+            importModuleDynamically: async specifier => {
+                assert.equal(specifier, './vendor/heic-to/heic-to.js');
+                const decoder = new vm.SyntheticModule(['heicTo'], function () {
+                    this.setExport('heicTo', async ({ blob, type }) => {
+                        assert.equal(blob.name, 'photo.HEIC');
+                        assert.equal(type, 'image/png');
+                        return new Blob(['converted composer image'], { type });
+                    });
+                }, { context });
+                await decoder.link(() => {});
+                await decoder.evaluate();
+                return decoder;
+            },
+        });
         cache.set(filename, module);
         await module.link(async specifier => {
             if (host[specifier]) {
@@ -258,6 +273,16 @@ test('command resolves references and handles posting, failures, chat switches a
     composer.files = [];
     await attachedPending;
     assert.equal(references.at(-1), Buffer.from('composer image').toString('base64'));
+
+    // Browsers may leave HEIC MIME empty or report application/octet-stream.
+    for (const type of ['', 'application/octet-stream']) {
+        const heic = Object.assign(new Blob(['HEIC photo'], { type }), { name: 'photo.HEIC' });
+        composer.files = [textFile, heic];
+        await commands[0].callback(fromAttachment, 'smile');
+        assert.equal(references.at(-1), Buffer.from('converted composer image').toString('base64'));
+        assert.equal(composer.files[1], heic);
+    }
+    composer.files = [];
 
     const beforeInvalidAttachment = generationCount;
     await assert.rejects(commands[0].callback(fromAttachment, 'smile'), /Open a chat/);
