@@ -372,6 +372,19 @@ test('command resolves references and handles posting, failures, chat switches a
         assert.deepEqual([generatedGraphs.at(-1)['1'].inputs.image, generatedGraphs.at(-1)['3'].inputs.image], expected);
     }
 
+    // A permutation changes workflow inputs, including the first-image alias.
+    await commands[0].callback({ ...fromMessage, attached: true, order: ' 2, 1 ' }, 'combine');
+    assert.deepEqual([generatedGraphs.at(-1)['1'].inputs.image, generatedGraphs.at(-1)['3'].inputs.image], [
+        'c2VsZWN0ZWQ=', composerBase64,
+    ]);
+    const beforeInvalidOrder = generationCount;
+    const requestsBeforeInvalidOrder = workflowRequests.length;
+    for (const order of ['', '1', '1,1', '2,3', '0,1', '-1,2', '1.5,2', '1,,2', '1,2,', '1,2,3', 'one,two', '1e0,2', null, [2, 1]]) {
+        await assert.rejects(commands[0].callback({ ...fromMessage, attached: true, order }, 'combine'), /order=.*exactly once/);
+    }
+    assert.equal(generationCount, beforeInvalidOrder);
+    assert.equal(workflowRequests.length, requestsBeforeInvalidOrder);
+
     // Repeated sources keep their internal order when all three types are mixed.
     for (let index = 3; index <= 6; index++) {
         multiGraph[String(index + 1)] = { class_type: 'Base64DecodeNode', inputs: { image: `%reference_image_${index}%` } };
@@ -389,11 +402,23 @@ test('command resolves references and handles posting, failures, chat switches a
         'c2VsZWN0ZWQ=', 'bGVnYWN5', 'bGVnYWN5', 'c2VsZWN0ZWQ=',
     ]);
 
+    composer.files = [attachment, textFile, secondAttachment];
+    await commands[0].callback({
+        ...args, reference: [legacyImage, selectedImage], message: [1, 2], attached: true, order: '3,1,6,2,5,4',
+    }, 'combine');
+    assert.deepEqual(['1', '3', '4', '5', '6', '7'].map(id => generatedGraphs.at(-1)[id].inputs.image), [
+        'c2VsZWN0ZWQ=', composerBase64, 'c2VsZWN0ZWQ=',
+        Buffer.from('second image').toString('base64'), 'bGVnYWN5', 'bGVnYWN5',
+    ]);
+    composer.files = [];
+
     // With explicit inputs, an empty composer does not add a last-message fallback.
     workflow = singleWorkflow;
     await commands[0].callback({ ...fromMessage, attached: true }, 'smile');
     assert.equal(references.at(-1), 'c2VsZWN0ZWQ=');
     await commands[0].callback({ ...args, attached: true }, 'smile');
+    assert.equal(references.at(-1), 'Ynl0ZXM=');
+    await commands[0].callback({ ...args, order: '1' }, 'smile');
     assert.equal(references.at(-1), 'Ynl0ZXM=');
     for (const name of ['reference', 'message']) {
         assert.equal(commands[0].namedArgumentList.find(arg => arg.name === name).acceptsMultiple, true);

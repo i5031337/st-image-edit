@@ -52,12 +52,13 @@ async function command(args, text) {
         }
         if (!explicit && !reference.length) reference.push(lastMessageReference());
         if (!reference.length) throw new Error('No reference image found. Attach an image or use reference= or message=.');
+        const orderedReferences = orderReferences(reference, args.order);
         const target = args.chat === undefined || isTrueBoolean(args.chat) ? getContext() : null;
         const chatId = target?.getCurrentChatId();
         if (target && !chatId) throw new Error('Open a chat before using chat=true.');
         const prompt = args.prompt ?? String(text ?? '');
         const url = await edit({
-            reference,
+            reference: orderedReferences,
             workflow: args.workflow,
             prompt,
             negativePrompt: args.negative ?? '',
@@ -74,6 +75,18 @@ async function command(args, text) {
     } finally {
         args._abortController?.removeEventListener('abort', abort);
     }
+}
+
+function orderReferences(references, order) {
+    if (order === undefined) return references;
+    const indices = typeof order === 'string' ? order.split(',').map(value => value.trim()) : [];
+    const positions = indices.map(Number);
+    if (indices.length !== references.length || indices.some(value => !/^[1-9]\d*$/.test(value))
+        || positions.some(value => !Number.isSafeInteger(value) || value > references.length)
+        || new Set(positions).size !== references.length) {
+        throw new Error(`order= must list each reference index from 1 to ${references.length} exactly once, separated by commas.`);
+    }
+    return positions.map(position => references[position - 1]);
 }
 
 function attachedReference() {
@@ -140,6 +153,7 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         argument('reference', 'Image URL or base64 data URL; repeat reference= for multiple images in order', false, ARGUMENT_TYPE.STRING, true),
         argument('message', 'Message ID to take the selected image from; repeat message= for multiple images in order', false, ARGUMENT_TYPE.NUMBER, true),
         argument('attached', 'Include all composer images first; use attached=true to combine with message= or reference= (default: use composer, then last message, when no explicit source)', false, ARGUMENT_TYPE.BOOLEAN),
+        argument('order', 'Comma-separated reference indices, each used once (1-based); e.g. "2,1" swaps the first two images'),
         argument('workflow', 'Saved workflow filename (defaults to the active ST ComfyUI workflow)'),
         argument('prompt', 'Editing instruction (alternatively use trailing text)'),
         argument('negative', 'Optional negative prompt'),
@@ -152,5 +166,5 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         description: 'Editing instruction when prompt= is omitted', typeList: [ARGUMENT_TYPE.STRING],
         isRequired: false,
     })],
-    helpString: '<p>Edit a reference using a saved ComfyUI workflow. Defaults to attached=true: use all composer images in attachment order, falling back to message={{lastMessageID}} if none is attached. Combine reference= and message= (zero-based chat message ID) freely; add attached=true to include composer images too. Image order is composer attachments, then message= images, then reference= URLs, preserving order within each group. Explicit sources skip the composer unless attached=true; an empty composer adds no last-message fallback when explicit sources are supplied. Use attached=false to skip the composer. Workflow defaults to the active ST ComfyUI workflow; use workflow= to override. Returns a saved URL and posts to chat by default; use chat=false for URL only. The original composer attachment stays unchanged.</p><p>Required inputs: %prompt% and %reference_image_1%, %reference_image_2%, etc. (raw base64), one per supplied image. %reference_image% is an alias for image 1. Repeat reference= or message= for multiple explicit sources. The workflow must use every supplied reference. Optional: %negative_prompt%, %seed%, %width%, %height%. Each placeholder fills a whole JSON string value. Dimensions default to ST Image Generation settings; literal workflow dimensions stay unchanged.</p><p><code>/image-edit Give her an amused smile.</code></p><p><code>/image-edit message=12 chat=false width=704 height=1280 Give her an amused smile.</code></p><p><code>/image-edit attached=true message=12 workflow="flux2_9b_edit_2ref.json" Put the person from image 1 in the outfit from image 2.</code></p>',
+    helpString: '<p>Edit a reference using a saved ComfyUI workflow. Defaults to attached=true: use all composer images in attachment order, falling back to message={{lastMessageID}} if none is attached. Combine reference= and message= (zero-based chat message ID) freely; add attached=true to include composer images too. Image order is composer attachments, then message= images, then reference= URLs, preserving order within each group. Use order="2,1" to swap two images, or any comma-separated permutation of the collected 1-based image indices; every index must appear exactly once. Explicit sources skip the composer unless attached=true; an empty composer adds no last-message fallback when explicit sources are supplied. Use attached=false to skip the composer. Workflow defaults to the active ST ComfyUI workflow; use workflow= to override. Returns a saved URL and posts to chat by default; use chat=false for URL only. The original composer attachment stays unchanged.</p><p>Required inputs: %prompt% and %reference_image_1%, %reference_image_2%, etc. (raw base64), one per supplied image. %reference_image% is an alias for image 1. Repeat reference= or message= for multiple explicit sources. The workflow must use every supplied reference. Optional: %negative_prompt%, %seed%, %width%, %height%. Each placeholder fills a whole JSON string value. Dimensions default to ST Image Generation settings; literal workflow dimensions stay unchanged.</p><p><code>/image-edit Give her an amused smile.</code></p><p><code>/image-edit message=12 chat=false width=704 height=1280 Give her an amused smile.</code></p><p><code>/image-edit attached=true message=12 workflow="flux2_9b_edit_2ref.json" Put the person from image 1 in the outfit from image 2.</code></p>',
 }));

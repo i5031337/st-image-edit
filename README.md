@@ -54,8 +54,17 @@ Repeat `reference=` to supply multiple URLs, or repeat `message=` to take one
 selected image from each specified message. References are ordered by source:
 composer attachments first, then `message=` images, then `reference=` URLs,
 preserving order within each group regardless of the order of named arguments.
-Each message
-uses its selected gallery image (or first image if the selection is not an
+Use `order="2,1"` to swap two references, or `order="3,1,2"` to move the third
+reference first. Indices start at 1 in the source order above, and every index
+must appear exactly once. Omitting `order=` keeps the default order. For example,
+with one composer image, this makes message 12's image reference 1 and the composer
+image reference 2:
+
+```text
+/image-edit attached=true message=12 order="2,1" workflow="flux2_9b_edit_2ref.json" Combine these images.
+```
+
+Each message uses its selected gallery image (or first image if the selection is not an
 image). Composer images use attachment order; non-image files are ignored.
 The original composer attachments stay unchanged. `workflow=` defaults to the active ComfyUI workflow. Optional
 arguments are `prompt="..."` instead of trailing text, `negative="..."`,
