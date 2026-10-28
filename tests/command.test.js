@@ -63,6 +63,11 @@ test('command resolves references and handles posting, failures, chat switches a
     const props = { fromProps: value => value };
     const host = {
         '../../../../script.js': {
+            substituteParams: text => text.replaceAll('{{char}}', 'Alice'),
+            getUserAvatar: () => '/user/images/user.png',
+            user_avatar: 'user.png',
+            getCharacterAvatar: () => '/user/images/character.png',
+            formatCharacterAvatar: avatar => `/user/images/${avatar}`,
             getRequestHeaders: () => ({}),
             getMediaIndex: message => message.extra?.media_index ?? 0,
             event_types: { MESSAGE_RECEIVED: 'received', CHARACTER_MESSAGE_RENDERED: 'rendered' },
@@ -428,4 +433,19 @@ test('command resolves references and handles posting, failures, chat switches a
     composer.files = [];
     messages.length = 0;
     await assert.rejects(commands[0].callback(automatic, 'smile'), /No reference image found/);
+
+    // Use the host's generation settings, custom placeholders, and macro engine.
+    sd.steps = 28;
+    sd.comfy_placeholders = [{ find: 'subject', replace: '{{char}}' }];
+    const macroGraph = JSON.parse(singleWorkflow);
+    macroGraph['3'] = { class_type: 'Settings', inputs: {
+        steps: '%steps%', subject: '%subject%', denoise: '%denoise%', clip_skip: '%clip_skip%',
+    } };
+    workflow = JSON.stringify(macroGraph);
+    await commands[0].callback({ ...args, negative: '{{char}} frowning' }, '{{char}} smiling');
+    assert.equal(generatedGraphs.at(-1)['2'].inputs.prompt, 'Alice smiling');
+    assert.equal(generatedGraphs.at(-1)['3'].inputs.steps, 28);
+    assert.equal(generatedGraphs.at(-1)['3'].inputs.subject, 'Alice');
+    assert.equal(generatedGraphs.at(-1)['3'].inputs.denoise, 1);
+    assert.equal(generatedGraphs.at(-1)['3'].inputs.clip_skip, -1);
 });

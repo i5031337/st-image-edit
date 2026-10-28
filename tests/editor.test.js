@@ -54,7 +54,7 @@ function fixture(options = {}) {
         },
         ...options.deps,
     };
-    return { edit: createEditor(deps), requests, saves };
+    return { edit: createEditor(deps), requests, saves, deps };
 }
 
 test('typed substitution preserves arbitrary prompt text and never re-expands it', () => {
@@ -495,4 +495,83 @@ test('two-reference Flux example conditions on both images with the original mod
     assert.deepEqual(graph['94'].inputs.images, ['124', 0]);
     assert.equal(Object.values(graph).filter(node => node.class_type === 'SaveImage').length, 1);
     assert.throws(() => populateWorkflow(text, { '%reference_image_1%': 'person', '%prompt%': 'edit', '%seed%': 12 }), /%reference_image_2%/);
+});
+
+test('host placeholders and macros preserve types and never expand replacement text again', async () => {
+    const workflow = JSON.stringify({ ...graph, '3': { class_type: 'Settings', inputs: {
+        steps: '%steps%', scale: '%scale%', custom: '%scene-description%', literal: 'unchanged',
+    } } });
+    const f = fixture({ workflow, deps: {
+        getDefaults: () => ({ url: 'http://comfy.local', values: {
+            '%steps%': 24, '%scale%': 4.5, '%scene-description%': 'Alice says "hello"\n%seed%',
+        } }),
+        expandMacros: text => text.replaceAll('{{char}}', 'Alice'),
+    } });
+    await f.edit({ ...input, prompt: '{{char}} smiles', negativePrompt: '{{char}} frowns' });
+    const result = JSON.parse(f.requests.find(r => r.url.endsWith('/generate')).body.prompt).prompt;
+    assert.equal(result['2'].inputs.prompt, 'Alice smiles');
+    assert.equal(result['2'].inputs.negative, 'Alice frowns');
+    assert.deepEqual(result['3'].inputs, {
+        steps: 24, scale: 4.5, custom: 'Alice says "hello"\n%seed%', literal: 'unchanged',
+    });
+});
+
+test('avatars load only when used in inputs and failed responses use the SD fallback image', async () => {
+    for (const ok of [true, false]) {
+        let fetches = 0;
+        const avatar = '/user/images/avatar.png';
+        const defaults = { url: 'http://comfy.local', avatars: {
+            '%user_avatar%': avatar, '%char_avatar%': avatar,
+        } };
+        const f = fixture({
+            workflow: JSON.stringify({ ...graph, '3': { class_type: 'Avatar', inputs: {
+                user: '%user_avatar%', char: '%char_avatar%',
+            } } }),
+            deps: { getDefaults: () => defaults },
+        });
+        const backend = f.deps.fetch;
+        f.deps.fetch = async (url, init) => {
+            if (url !== avatar) return backend(url, init);
+            fetches++;
+            return new Response('avatar', { status: ok ? 200 : 404 });
+        };
+        await f.edit(input);
+        const result = JSON.parse(f.requests.find(r => r.url.endsWith('/generate')).body.prompt).prompt;
+        const expected = ok ? Buffer.from('avatar').toString('base64')
+            : 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+        assert.equal(result['3'].inputs.user, expected);
+        assert.equal(result['3'].inputs.char, expected);
+        assert.equal(fetches, 2);
+        const unused = fixture({
+            workflow: JSON.stringify({ ...graph, '3': { class_type: 'Unused', inputs: {}, _meta: { title: '%user_avatar%' } } }),
+            deps: { getDefaults: () => defaults },
+        });
+        await unused.edit(input); // The fixture rejects any unexpected avatar request.
+    }
+});
+
+test('queued jobs snapshot host placeholders and macros', async () => {
+    const gate = deferred();
+    const started = deferred();
+    const defaults = { url: 'http://comfy.local', values: { '%steps%': 20 } };
+    let character = 'Alice';
+    let count = 0;
+    const f = fixture({
+        workflow: JSON.stringify({ ...graph, '3': { class_type: 'Settings', inputs: { steps: '%steps%' } } }),
+        deps: { getDefaults: () => defaults, expandMacros: text => text.replaceAll('{{char}}', character) },
+        generate: async () => {
+            if (++count === 1) { started.resolve(); await gate.promise; }
+            return Response.json({ format: 'png', data: 'output' });
+        },
+    });
+    const first = f.edit(input);
+    await started.promise;
+    const second = f.edit({ ...input, prompt: '{{char}} smiles' });
+    defaults.values['%steps%'] = 99;
+    character = 'Bob';
+    gate.resolve();
+    await Promise.all([first, second]);
+    const result = JSON.parse(f.requests.filter(r => r.url.endsWith('/generate'))[1].body.prompt).prompt;
+    assert.equal(result['2'].inputs.prompt, 'Alice smiles');
+    assert.equal(result['3'].inputs.steps, 20);
 });

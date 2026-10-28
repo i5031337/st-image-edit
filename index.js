@@ -1,4 +1,5 @@
-import { eventSource, event_types, getMediaIndex, getRequestHeaders } from '../../../../script.js';
+import { eventSource, event_types, getMediaIndex, getRequestHeaders, substituteParams,
+    getUserAvatar, user_avatar, getCharacterAvatar, formatCharacterAvatar } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
 import { getBase64Async, isTrueBoolean, saveBase64AsFile, uuidv4 } from '../../../utils.js';
 import { getMessageTimeStamp } from '../../../RossAscends-mods.js';
@@ -9,16 +10,23 @@ import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { createEditor } from './editor.js';
 import { isHeicFile } from './image.js';
+import { comfyValues, characterAvatarUrl } from './comfy.js';
 
 // Other extensions may import this function directly; it returns the saved URL.
 export const edit = createEditor({
     fetch: (...args) => fetch(...args),
     headers: getRequestHeaders,
+    expandMacros: substituteParams,
     getDefaults: () => ({
         url: extension_settings.sd?.comfy_url?.trim(),
         workflow: extension_settings.sd?.comfy_workflow,
         width: extension_settings.sd?.width,
         height: extension_settings.sd?.height,
+        values: comfyValues(extension_settings.sd ?? {}, substituteParams),
+        avatars: {
+            '%user_avatar%': getUserAvatar(user_avatar),
+            '%char_avatar%': characterAvatarUrl(getContext(), getCharacterAvatar, formatCharacterAvatar),
+        },
     }),
     encode: getBase64Async,
     save: saveBase64AsFile,

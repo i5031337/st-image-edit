@@ -3,6 +3,7 @@ import { convertHeicToPng, isHeicBlob, stripReferenceMetadata } from './image.js
 
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const OUTPUT_FORMATS = new Set(['png', 'jpg', 'jpeg', 'webp']);
+const PNG_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 function checkAbort(signal) {
     if (signal?.aborted) throw new DOMException('Image edit cancelled.', 'AbortError');
@@ -75,7 +76,10 @@ export function createEditor(deps) {
         const job = {
             ...input, url: defaults.url,
             workflow: input.workflow === undefined ? defaults.workflow : input.workflow,
+            values: { ...defaults.values },
+            avatars: { ...defaults.avatars },
         };
+        if (typeof job.prompt === 'string' && deps.expandMacros) job.prompt = deps.expandMacros(job.prompt);
         if (!job.url) throw new Error('Configure the ComfyUI URL in ST Image Generation first.');
         if (typeof job.prompt !== 'string' || !job.prompt.trim()) {
             throw new Error('Supply an editing prompt.');
@@ -91,6 +95,7 @@ export function createEditor(deps) {
         if (!job.references.length) throw new Error('Supply at least one reference image.');
         job.negativePrompt ??= '';
         if (typeof job.negativePrompt !== 'string') throw new Error('Negative prompt must be text.');
+        if (deps.expandMacros) job.negativePrompt = deps.expandMacros(job.negativePrompt);
         job.seed = integer(job.seed === undefined ? deps.randomSeed() : job.seed, 'Seed', 0);
         for (const name of ['width', 'height']) {
             const value = job[name] === undefined ? defaults[name] : job[name];
@@ -108,6 +113,7 @@ export function createEditor(deps) {
             const text = await post('/api/sd/comfy/workflow', { file_name: job.workflow }, signal);
             checkAbort(signal);
             const values = {
+                ...job.values,
                 '%prompt%': job.prompt,
                 '%negative_prompt%': job.negativePrompt, '%seed%': job.seed,
             };
@@ -118,7 +124,22 @@ export function createEditor(deps) {
                 values[`%reference_image_${index}%`] = '';
             }
             values['%reference_image%'] = '';
-            populateWorkflow(text, values, job.references.length); // Validate before loading images.
+            // Validate with empty avatars before fetching any image data.
+            const avatarValues = Object.fromEntries(Object.keys(job.avatars).map(key => [key, '']));
+            populateWorkflow(text, { ...avatarValues, ...values }, job.references.length);
+            const nodes = Object.values(JSON.parse(text));
+            for (const [key, url] of Object.entries(job.avatars)) {
+                if (Object.hasOwn(values, key)) continue;
+                // Only fetch avatars referenced by executable inputs, not metadata.
+                const contains = value => value === key || (value && typeof value === 'object' && Object.values(value).some(contains));
+                if (!nodes.some(node => contains(node.inputs))) continue;
+                const response = await deps.fetch(url, { signal });
+                checkAbort(signal);
+                values[key] = response.ok
+                    ? (await deps.encode(await response.blob())).split(',')[1]
+                    : PNG_PIXEL;
+                checkAbort(signal);
+            }
             for (let index = 0; index < job.references.length; index++) {
                 values[`%reference_image_${index + 1}%`] = await loadReference(job.references[index], deps, signal);
             }

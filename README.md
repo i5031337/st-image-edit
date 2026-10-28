@@ -78,6 +78,10 @@ Export your ComfyUI graph in **API format**. Use these placeholders as whole inp
 | `%reference_image_1%`, `%reference_image_2%`, … | Raw base64 image data, one placeholder per reference. |
 | `%reference_image%` | Alias for the first reference. |
 | `%negative_prompt%`, `%seed%`, `%width%`, `%height%` | Optional prompt, seed, and dimension values. |
+| `%model%`, `%vae%`, `%sampler%`, `%scheduler%`, `%steps%`, `%scale%`, `%denoise%`, `%clip_skip%` | Values from Image Generation settings, using the same conventions as `/sd`. |
+| `%user_avatar%`, `%char_avatar%` | User and character avatars as raw base64. |
+
+Custom placeholders from SillyTavern's ComfyUI workflow editor are also supported. Their replacement text, and editing and negative prompts, can use SillyTavern macros such as `{{char}}` and `{{user}}`. Built-in placeholders take precedence over custom ones.
 
 The number of supplied images must match the workflow's reference placeholders. There is no fixed reference-count limit.
 
