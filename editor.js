@@ -9,6 +9,27 @@ function checkAbort(signal) {
     if (signal?.aborted) throw new DOMException('Image edit cancelled.', 'AbortError');
 }
 
+async function responseError(response, action) {
+    let detail = '';
+    try {
+        const text = (await response.text()).trim();
+        // Proxy error pages are not useful in a toast. Keep plain server diagnostics.
+        if (!response.headers.get('content-type')?.includes('text/html') && !/^\s*</.test(text)) {
+            detail = text;
+            try {
+                const body = JSON.parse(text);
+                const message = body?.error?.message ?? body?.message ?? body?.error;
+                if (typeof message === 'string') detail = message;
+            } catch { /* Plain text is the normal ComfyUI error response. */ }
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') throw error;
+    }
+    detail = detail.trim();
+    if (detail.length > 2000) detail = `${detail.slice(0, 2000)}…`;
+    return new Error(`${action} (${response.status}): ${detail || 'Check the SillyTavern server logs for details.'}`);
+}
+
 function integer(value, name, minimum) {
     if (!['number', 'string'].includes(typeof value) || String(value).trim() === '') {
         throw new Error(`${name} must be an integer of at least ${minimum}.`);
@@ -34,7 +55,7 @@ async function loadReference(reference, { fetch, encode, origin, convertHeic = c
             throw new Error('Reference must be a same-origin URL or a PNG/JPEG/WebP/HEIC/HEIF base64 data URL.');
         }
         const response = await fetch(url.href, { signal, redirect: 'error' });
-        if (!response.ok) throw new Error(`Could not load reference image (${response.status}).`);
+        if (!response.ok) throw await responseError(response, 'Could not load reference image');
         blob = await response.blob();
     }
     checkAbort(signal);
@@ -67,7 +88,14 @@ export function createEditor(deps) {
         const response = await deps.fetch(endpoint, {
             method: 'POST', headers: deps.headers(), body: JSON.stringify(body), signal,
         });
-        if (!response.ok) throw new Error(`Image Edit: ${endpoint} failed (${response.status}).`);
+        if (!response.ok) {
+            const action = {
+                '/api/sd/comfy/workflows': 'Could not list saved ComfyUI workflows',
+                '/api/sd/comfy/workflow': 'Could not load the saved ComfyUI workflow',
+                '/api/sd/comfy/generate': 'ComfyUI image generation failed',
+            }[endpoint];
+            throw await responseError(response, action);
+        }
         return response.json();
     }
     return async function edit(input) {

@@ -402,6 +402,44 @@ test('generation and saving failures reject and do not poison the queue', async 
 });
 
 
+test('backend errors retain useful diagnostics and fall back for empty or HTML responses', async () => {
+    for (const [response, expected] of [
+        [new Response('VAELoader [127] FileNotFoundError: flux2-vae.safetensors', { status: 500 }), /VAELoader \[127\] FileNotFoundError: flux2-vae\.safetensors/],
+        [Response.json({ error: { message: 'Missing node Base64DecodeNode' } }, { status: 400 }), /Missing node Base64DecodeNode/],
+        [Response.json({ message: 'CUDA out of memory' }, { status: 500 }), /CUDA out of memory/],
+        [new Response('', { status: 500 }), /Check the SillyTavern server logs/],
+        [new Response('<html>Bad Gateway</html>', { status: 502, headers: { 'Content-Type': 'text/html' } }), /Check the SillyTavern server logs/],
+    ]) {
+        const f = fixture({ generate: async () => response });
+        await assert.rejects(f.edit(input), error => {
+            assert.match(error.message, /ComfyUI image generation failed \((400|500|502)\):/);
+            assert.match(error.message, expected);
+            assert.doesNotMatch(error.message, /<html>/);
+            return true;
+        });
+        assert.equal(f.saves.length, 0);
+    }
+});
+
+test('workflow and reference failures identify the operation and preserve server details', async () => {
+    for (const [endpoint, job, expected] of [
+        ['/api/sd/comfy/workflows', input, /Could not list saved ComfyUI workflows/],
+        ['/api/sd/comfy/workflow', input, /Could not load the saved ComfyUI workflow/],
+        ['http://st.local/user/images/reference.png', { ...input, reference: '/user/images/reference.png' }, /Could not load reference image/],
+    ]) {
+        const f = fixture();
+        const fetch = f.deps.fetch;
+        f.deps.fetch = async (url, init) => url === endpoint
+            ? new Response('Permission denied', { status: 403 }) : fetch(url, init);
+        await assert.rejects(f.edit(job), error => {
+            assert.match(error.message, expected);
+            assert.match(error.message, /\(403\): Permission denied/);
+            return true;
+        });
+        assert.equal(f.saves.length, 0);
+    }
+});
+
 test('supports arbitrary reference counts and both spellings for the first image', async () => {
     for (const count of [1, 4, 10, 17]) {
         const workflow = { 'prompt': { class_type: 'Text', inputs: { text: '%prompt%' } } };

@@ -78,7 +78,7 @@ async function command(args, text) {
         if (target) await postImage(url, prompt, target, chatId);
         return url;
     } catch (error) {
-        if (error.name !== 'AbortError') toastr.error(error.message, 'Image Edit');
+        if (error.name !== 'AbortError') toastr.error(error.message, 'Image Edit', { escapeHtml: true });
         throw error;
     } finally {
         args._abortController?.removeEventListener('abort', abort);
