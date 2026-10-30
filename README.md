@@ -2,6 +2,18 @@
 
 Edit images through ComfyUI with `/image-edit`. Results are saved and posted to chat; original images stay unchanged.
 
+## Example
+
+The command used on the original image:
+
+```text
+/image-edit workflow="flux2_9b_edit.json" Dress her in an evening gown, photographed from the front, city street background
+```
+
+| Original | Edited with `/image-edit` |
+| --- | --- |
+| ![SillyTavern user message #1 with the original portrait](demo/before-edit.png) | ![SillyTavern Image Edit message #2 with the edited portrait](demo/after-edit.png) |
+
 ## Setup
 
 1. Open **Extensions → Install Extension**, paste `https://github.com/i5031337/st-image-edit`, install, and reload SillyTavern.
